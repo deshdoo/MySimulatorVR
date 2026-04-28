@@ -5490,17 +5490,6 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: eb519cd8c190ed7469bf919221c543e8, type: 3}
---- !u!114 &115551054 stripped
-MonoBehaviour:
-  m_CorrespondingSourceObject: {fileID: 1548616752326558286, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
-  m_PrefabInstance: {fileID: 225862315}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 0
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: a8801bb7f9b04452da7133ab9b4d7a8d, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
 --- !u!1 &192919060
 GameObject:
   m_ObjectHideFlags: 0
@@ -5544,6 +5533,10 @@ PrefabInstance:
     - target: {fileID: 1357987079897271429, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
       propertyPath: m_Layer
       value: 7
+      objectReference: {fileID: 0}
+    - target: {fileID: 1548616752326558280, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
+      propertyPath: m_Enabled
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 1548616752326558281, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
       propertyPath: m_Actions
@@ -5616,7 +5609,7 @@ PrefabInstance:
     - target: {fileID: 1548616752326558281, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
       propertyPath: m_ActionEvents.Array.data[2].m_PersistentCalls.m_Calls.Array.data[0].m_Target
       value: 
-      objectReference: {fileID: 115551054}
+      objectReference: {fileID: 0}
     - target: {fileID: 1548616752326558281, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
       propertyPath: m_ActionEvents.Array.data[2].m_PersistentCalls.m_Calls.Array.data[0].m_CallState
       value: 2
@@ -5652,6 +5645,10 @@ PrefabInstance:
     - target: {fileID: 7557023250556030783, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
       propertyPath: m_Layer
       value: 7
+      objectReference: {fileID: 0}
+    - target: {fileID: 7557023252136657269, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
+      propertyPath: m_Enabled
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 7557023252504341545, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
       propertyPath: m_Name
@@ -5711,7 +5708,7 @@ PrefabInstance:
       objectReference: {fileID: -944628639613478452, guid: a37c230d7e717604fa83aca29bae6867, type: 3}
     - target: {fileID: 7557023252504341553, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
       propertyPath: m_Enabled
-      value: 1
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 7557023252504341553, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
       propertyPath: m_DefaultActionMap
@@ -5764,7 +5761,7 @@ PrefabInstance:
     - target: {fileID: 7557023252504341553, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
       propertyPath: m_ActionEvents.Array.data[2].m_PersistentCalls.m_Calls.Array.data[0].m_Target
       value: 
-      objectReference: {fileID: 115551054}
+      objectReference: {fileID: 0}
     - target: {fileID: 7557023252504341553, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
       propertyPath: m_ActionEvents.Array.data[2].m_PersistentCalls.m_Calls.Array.data[0].m_MethodName
       value: PressToggleGrabber
@@ -5779,7 +5776,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 7557023252504341554, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
       propertyPath: m_Volume
-      value: 0.05
+      value: 0.04
       objectReference: {fileID: 0}
     - target: {fileID: 7557023252504341554, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
       propertyPath: m_Enabled
@@ -5791,7 +5788,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 7557023252504341559, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
       propertyPath: m_Enabled
-      value: 1
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 7557023252504341559, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
       propertyPath: enableDebug
@@ -5805,7 +5802,12 @@ PrefabInstance:
       propertyPath: m_Layer
       value: 7
       objectReference: {fileID: 0}
-    m_RemovedComponents: []
+    m_RemovedComponents:
+    - {fileID: 7557023252504341558, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
+    - {fileID: 7557023252504341559, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
+    - {fileID: 7557023252504341553, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
+    - {fileID: 1548616752326558286, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
+    - {fileID: 1548616752326558281, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
     m_RemovedGameObjects: []
     m_AddedGameObjects:
     - targetCorrespondingSourceObject: {fileID: 7557023252504341549, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
@@ -17060,7 +17062,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 930773867}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: c2fadf230d1919748a9aa21d40f74619, type: 3}
   m_Name: 
@@ -22600,20 +22602,6 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 3e0c9209029399b459dc03738f9a2b9e, type: 3}
---- !u!114 &1714051126
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fc1515ab76e54f068e2f2207940fab32, type: 3}
-  m_Name: ROV/Move
-  m_EditorClassIdentifier: 
-  m_Asset: {fileID: -944628639613478452, guid: a37c230d7e717604fa83aca29bae6867, type: 3}
-  m_ActionId: 430a5400-c3b1-44d6-9539-32bb3da39c07
 --- !u!1 &1789321123 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 7557023252504341545, guid: d15cfa1b5937bc7438a9f51e16a078db, type: 3}
@@ -22631,21 +22619,14 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1789321123}
-  m_Enabled: 0
+  m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: f837d8300a7f6f1468f61266cae6797a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   thrustForward: 5
-  thrustSide: 5
   thrustVertical: 4
   torqueYaw: 0.2
-  moveAction: {fileID: 1714051126}
-  rotateAction: {fileID: 1994293857}
-  manipulatorOpenAction: {fileID: 2138504366}
-  manipulatorCloseAction: {fileID: 0}
-  deadzone: 0.15
-  invertVertical: 0
 --- !u!1 &1798394667
 GameObject:
   m_ObjectHideFlags: 0
@@ -22753,34 +22734,6 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 0c44885e95f5c764a9e0c9e1c82410fb, type: 3}
---- !u!114 &1994293857
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fc1515ab76e54f068e2f2207940fab32, type: 3}
-  m_Name: ROV/Rotate
-  m_EditorClassIdentifier: 
-  m_Asset: {fileID: -944628639613478452, guid: a37c230d7e717604fa83aca29bae6867, type: 3}
-  m_ActionId: 30e9c8d2-8ff7-4c43-a244-008983d35b14
---- !u!114 &2138504366
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fc1515ab76e54f068e2f2207940fab32, type: 3}
-  m_Name: ROV/ToggleGrabber
-  m_EditorClassIdentifier: 
-  m_Asset: {fileID: -944628639613478452, guid: a37c230d7e717604fa83aca29bae6867, type: 3}
-  m_ActionId: 3407039b-c094-4005-bb9b-ea997573868a
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
