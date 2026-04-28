@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-// Простая версия: Raycast от контроллеров + emission подсветка на указанном Renderer
+// Raycast от контроллеров + emission подсветка + VR Grab (grip + движение руки)
 public class LeverController : MonoBehaviour
 {
     public enum LeverAxis { Forward, Vertical, Yaw }
@@ -33,6 +33,12 @@ public class LeverController : MonoBehaviour
     [Tooltip("Дальность луча от контроллера")]
     public float rayDistance = 5f;
 
+    [Header("VR Grab")]
+    [Tooltip("Сколько метров движения руки = полный ход рычага (от minAngle до maxAngle)")]
+    public float grabRange = 0.25f;
+    [Tooltip("По какой оси считать движение руки: Camera Forward — относительно взгляда")]
+    public bool useCameraForward = true;
+
     private float _angle;
     private bool _hoveredLeft;
     private bool _hoveredRight;
@@ -43,15 +49,34 @@ public class LeverController : MonoBehaviour
 
     private InputAction _leftStick;
     private InputAction _rightStick;
+    private InputAction _leftGrip;
+    private InputAction _rightGrip;
+
+    // Grab state
+    private Transform _grabbingHand;       // null если никто не схватил
+    private Vector3 _grabStartHandPos;     // позиция руки в момент захвата
+    private float _grabStartAngle;         // угол рычага в момент захвата
+    private Camera _mainCam;
+
+    // Глобальный реестр: какой контроллер сейчас держит какой рычаг.
+    // 1 контроллер = максимум 1 рычаг. Два контроллера = максимум 2 разных рычага.
+    private static readonly System.Collections.Generic.Dictionary<Transform, LeverController> _activeGrabs
+        = new System.Collections.Generic.Dictionary<Transform, LeverController>();
 
     void Awake()
     {
-        Debug.Log($"[LeverController v4-SIMPLE] Awake on {gameObject.name}");
+        Debug.Log($"[LeverController v5-GRAB] Awake on {gameObject.name}");
 
         _leftStick = new InputAction(binding: "<XRController>{LeftHand}/thumbstick");
         _rightStick = new InputAction(binding: "<XRController>{RightHand}/thumbstick");
+        _leftGrip = new InputAction(binding: "<XRController>{LeftHand}/grip");
+        _rightGrip = new InputAction(binding: "<XRController>{RightHand}/grip");
         _leftStick.Enable();
         _rightStick.Enable();
+        _leftGrip.Enable();
+        _rightGrip.Enable();
+
+        _mainCam = Camera.main;
 
         CacheMaterial(leverRenderer);
         CacheMaterial(leverRenderer2);
@@ -63,7 +88,7 @@ public class LeverController : MonoBehaviour
     void CacheMaterial(Renderer r)
     {
         if (r == null) return;
-        var m = r.material; // инстанс
+        var m = r.material;
         _mats.Add(m);
         _hadEmissions.Add(m.IsKeywordEnabled("_EMISSION"));
         _origEmissions.Add(m.HasProperty("_EmissionColor") ? m.GetColor("_EmissionColor") : Color.black);
@@ -73,6 +98,8 @@ public class LeverController : MonoBehaviour
     {
         _leftStick?.Dispose();
         _rightStick?.Dispose();
+        _leftGrip?.Dispose();
+        _rightGrip?.Dispose();
     }
 
     void Update()
@@ -81,27 +108,83 @@ public class LeverController : MonoBehaviour
         _hoveredRight = CheckRay(rightControllerTransform);
 
         bool hovered = _hoveredLeft || _hoveredRight;
-        ApplyHighlight(hovered);
+        bool isGrabbing = _grabbingHand != null;
+        // Подсветка: когда наводишь ИЛИ держишь
+        ApplyHighlight(hovered || isGrabbing);
 
-        float input = 0f;
+        // === VR Grab logic ===
+        bool leftGrip  = _leftGrip.ReadValue<float>()  > 0.5f;
+        bool rightGrip = _rightGrip.ReadValue<float>() > 0.5f;
 
-        // Любой ввод работает только при наведении (когда рычаг подсвечен)
-        if (hovered)
+        if (_grabbingHand == null)
         {
-            if (Keyboard.current != null)
-            {
-                if (Keyboard.current[keyPositive].isPressed) input += 1f;
-                if (Keyboard.current[keyNegative].isPressed) input -= 1f;
-            }
-
-            if (_hoveredLeft)  input += _leftStick.ReadValue<Vector2>().y;
-            if (_hoveredRight) input += _rightStick.ReadValue<Vector2>().y;
-            input = Mathf.Clamp(input, -1f, 1f);
+            // Начинаем захват только если наводимся И зажат grip И этот контроллер ещё свободен
+            if (_hoveredLeft && leftGrip && leftControllerTransform != null
+                && !_activeGrabs.ContainsKey(leftControllerTransform))
+                StartGrab(leftControllerTransform);
+            else if (_hoveredRight && rightGrip && rightControllerTransform != null
+                && !_activeGrabs.ContainsKey(rightControllerTransform))
+                StartGrab(rightControllerTransform);
+        }
+        else
+        {
+            // Отпустили grip — релиз
+            bool stillGripping =
+                (_grabbingHand == leftControllerTransform  && leftGrip)
+             || (_grabbingHand == rightControllerTransform && rightGrip);
+            if (!stillGripping) ReleaseGrab();
         }
 
-        float dir = invert ? -1f : 1f;
-        _angle += input * 60f * Time.deltaTime * dir;
-        _angle = Mathf.Clamp(_angle, minAngle, maxAngle);
+        // === Применение углов ===
+        if (_grabbingHand != null)
+        {
+            // Прямое VR-управление: угол = функция смещения руки от точки захвата
+            Vector3 delta = _grabbingHand.position - _grabStartHandPos;
+
+            // Для Yaw (3 рычаг) используем горизонтальную ось (лево/право),
+            // для Forward/Vertical — глубинную (вперёд/назад)
+            Vector3 dirAxis;
+            if (axis == LeverAxis.Yaw)
+            {
+                dirAxis = (useCameraForward && _mainCam != null)
+                    ? _mainCam.transform.right
+                    : Vector3.right;
+            }
+            else
+            {
+                dirAxis = (useCameraForward && _mainCam != null)
+                    ? _mainCam.transform.forward
+                    : Vector3.forward;
+            }
+            dirAxis.y = 0f;
+            dirAxis = dirAxis.sqrMagnitude > 0.001f ? dirAxis.normalized : Vector3.forward;
+
+            float along = Vector3.Dot(delta, dirAxis);
+            // Нормализуем: grabRange метров = полный ход (-1..1)
+            float t = Mathf.Clamp(along / grabRange, -1f, 1f);
+            float dirSign = invert ? -1f : 1f;
+            _angle = _grabStartAngle + t * (maxAngle - minAngle) * 0.5f * dirSign;
+            _angle = Mathf.Clamp(_angle, minAngle, maxAngle);
+        }
+        else
+        {
+            // Обычный режим — клавиатура и стик при наведении
+            float input = 0f;
+            if (hovered)
+            {
+                if (Keyboard.current != null)
+                {
+                    if (Keyboard.current[keyPositive].isPressed) input += 1f;
+                    if (Keyboard.current[keyNegative].isPressed) input -= 1f;
+                }
+                if (_hoveredLeft)  input += _leftStick.ReadValue<Vector2>().y;
+                if (_hoveredRight) input += _rightStick.ReadValue<Vector2>().y;
+                input = Mathf.Clamp(input, -1f, 1f);
+            }
+            float dirSign = invert ? -1f : 1f;
+            _angle += input * 60f * Time.deltaTime * dirSign;
+            _angle = Mathf.Clamp(_angle, minAngle, maxAngle);
+        }
 
         transform.localEulerAngles = axis == LeverAxis.Yaw
             ? new Vector3(-_angle, 0f, 0f)
@@ -112,15 +195,32 @@ public class LeverController : MonoBehaviour
         WriteToInput(normalized);
     }
 
+    void StartGrab(Transform hand)
+    {
+        _grabbingHand = hand;
+        _grabStartHandPos = hand.position;
+        _grabStartAngle = _angle;
+        _activeGrabs[hand] = this;
+    }
+
+    void ReleaseGrab()
+    {
+        if (_grabbingHand != null && _activeGrabs.TryGetValue(_grabbingHand, out var owner) && owner == this)
+            _activeGrabs.Remove(_grabbingHand);
+        _grabbingHand = null;
+    }
+
+    void OnDisable()
+    {
+        ReleaseGrab();
+    }
+
     bool CheckRay(Transform controller)
     {
         if (controller == null) return false;
         Ray ray = new Ray(controller.position, controller.forward);
         if (Physics.Raycast(ray, out RaycastHit hit, rayDistance))
-        {
-            // считаем попадание если коллайдер принадлежит этому рычагу или его детям
             return hit.collider != null && hit.collider.transform.IsChildOf(transform);
-        }
         return false;
     }
 
