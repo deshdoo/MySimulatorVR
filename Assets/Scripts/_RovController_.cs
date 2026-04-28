@@ -20,8 +20,6 @@ public class RovController : MonoBehaviour
 
     void FixedUpdate()
     {
-        Debug.Log($"Forward: {DroneInput.forward} Vertical: {DroneInput.vertical} Yaw: {DroneInput.yaw}");
-
         _rb.AddRelativeForce(new Vector3(
             0f,
             DroneInput.vertical * thrustVertical,
