@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using System.Collections.Generic;
 
 // Не зависит от XRI — использует собственный Raycast от контроллеров
 public class LeverController : MonoBehaviour
@@ -19,10 +20,9 @@ public class LeverController : MonoBehaviour
     [Header("Settings")]
     public bool invert = false;
 
-    [Header("VR Highlight")]
-    public Renderer leverRenderer;
-    public Color highlightColor = new Color(0.3f, 0.7f, 1f);
-    [Range(0f, 2f)] public float highlightIntensity = 0.5f;
+    [Header("VR Outline Highlight")]
+    public Color outlineColor = new Color(0.3f, 0.7f, 1f);
+    [Range(1.01f, 1.3f)] public float outlineScale = 1.08f;
 
     [Header("VR Controllers (assign in Inspector)")]
     public Transform leftControllerTransform;
@@ -31,11 +31,9 @@ public class LeverController : MonoBehaviour
     public float rayDistance = 5f;
 
     private float _angle;
-    private Material _mat;
-    private Color _origEmission;
-    private bool _hadEmission;
     private bool _hoveredLeft;
     private bool _hoveredRight;
+    private readonly List<GameObject> _outlineObjects = new List<GameObject>();
 
     private InputAction _leftStick;
     private InputAction _rightStick;
@@ -47,12 +45,7 @@ public class LeverController : MonoBehaviour
         _leftStick.Enable();
         _rightStick.Enable();
 
-        if (leverRenderer != null)
-        {
-            _mat = leverRenderer.material;
-            _hadEmission = _mat.IsKeywordEnabled("_EMISSION");
-            _origEmission = _mat.GetColor("_EmissionColor");
-        }
+        BuildOutlines();
     }
 
     void OnDestroy()
@@ -61,16 +54,57 @@ public class LeverController : MonoBehaviour
         _rightStick?.Dispose();
     }
 
+    // Создаём outline-клон для каждого MeshFilter в дочерних объектах
+    void BuildOutlines()
+    {
+        // Берём все MeshFilter-ы внутри LeverPivot, кроме самого себя
+        MeshFilter[] filters = GetComponentsInChildren<MeshFilter>(true);
+
+        Material outlineMat = CreateOutlineMaterial();
+
+        foreach (var mf in filters)
+        {
+            if (mf.sharedMesh == null) continue;
+
+            var outlineGO = new GameObject("_Outline_" + mf.gameObject.name);
+            outlineGO.transform.SetParent(mf.transform, false);
+            // Чуть больше оригинала чтобы торчал контур снаружи
+            outlineGO.transform.localScale = Vector3.one * outlineScale;
+
+            var outlineMF = outlineGO.AddComponent<MeshFilter>();
+            outlineMF.sharedMesh = mf.sharedMesh;
+
+            var outlineMR = outlineGO.AddComponent<MeshRenderer>();
+            outlineMR.material = outlineMat;
+            outlineMR.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            outlineMR.receiveShadows = false;
+
+            outlineGO.SetActive(false);
+            _outlineObjects.Add(outlineGO);
+        }
+    }
+
+    Material CreateOutlineMaterial()
+    {
+        // URP Unlit с Cull Front — рисует только внешние грани (и получается контур)
+        var mat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+        mat.name = "OutlineMat";
+        // Cull Front = 1: отбрасываем передние грани, видны только задние — эффект outline
+        mat.SetInt("_Cull", (int)UnityEngine.Rendering.CullMode.Front);
+        mat.SetColor("_BaseColor", outlineColor);
+        // Рисуем поверх всего чтобы не резало Z-буфер
+        mat.renderQueue = 3001;
+        return mat;
+    }
+
     void Update()
     {
-        // Определяем наведение через Raycast
         _hoveredLeft  = CheckRay(leftControllerTransform);
         _hoveredRight = CheckRay(rightControllerTransform);
 
         bool hovered = _hoveredLeft || _hoveredRight;
-        ApplyHighlight(hovered);
+        SetOutline(hovered);
 
-        // Считаем input
         float input = 0f;
 
         if (Keyboard.current != null)
@@ -105,19 +139,10 @@ public class LeverController : MonoBehaviour
         return false;
     }
 
-    void ApplyHighlight(bool on)
+    void SetOutline(bool on)
     {
-        if (_mat == null) return;
-        if (on)
-        {
-            _mat.EnableKeyword("_EMISSION");
-            _mat.SetColor("_EmissionColor", highlightColor * highlightIntensity);
-        }
-        else
-        {
-            if (!_hadEmission) _mat.DisableKeyword("_EMISSION");
-            _mat.SetColor("_EmissionColor", _origEmission);
-        }
+        foreach (var go in _outlineObjects)
+            if (go != null) go.SetActive(on);
     }
 
     void WriteToInput(float value)
