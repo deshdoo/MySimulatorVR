@@ -2,61 +2,71 @@ Shader "Custom/UnderwaterGodRays"
 {
     Properties
     {
-        _MainTex ("Base (RGB)", 2D) = "white" {}
+        _LightColor ("Light Color", Color) = (0.5, 0.9, 1, 1)
     }
     SubShader
     {
-        Cull Off ZWrite Off ZTest Always
-        Fog { Mode Off }
+        Tags { "RenderPipeline" = "UniversalPipeline" }
 
         Pass
         {
-            CGPROGRAM
-            #pragma vertex vert_img
-            #pragma fragment frag
-            #include "UnityCG.cginc"
+            Name "UnderwaterGodRays"
+            ZWrite Off ZTest Always Cull Off
 
-            sampler2D _MainTex;
+            HLSLPROGRAM
+            #pragma vertex Vert
+            #pragma fragment Frag
 
-            float2 _LightPos;    // позиция "солнца" в координатах экрана (0..1)
-            float  _Exposure;    // общая яркость лучей
-            float  _Decay;       // затухание по длине
-            float  _Density;     // плотность выборок
-            float  _Weight;      // вес каждой выборки
-            int    _Samples;     // количество шагов
-            fixed4 _LightColor;  // цвет лучей
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
 
-            fixed4 frag (v2f_img i) : SV_Target
+            float2 _LightPos;    // РїРѕР·РёС†РёСЏ "СЃРѕР»РЅС†Р°" РІ РєРѕРѕСЂРґРёРЅР°С‚Р°С… СЌРєСЂР°РЅР° (0..1)
+            float  _Exposure;    // РѕР±С‰Р°СЏ СЏСЂРєРѕСЃС‚СЊ Р»СѓС‡Р°
+            float  _Decay;       // Р·Р°С‚СѓС…Р°РЅРёРµ РїРѕ РґР»РёРЅРµ
+            float  _Density;     // РїР»РѕС‚РЅРѕСЃС‚СЊ РІС‹Р±РѕСЂРѕРє
+            float  _Weight;      // РІРµСЃ РѕРґРЅРѕР№ РІС‹Р±РѕСЂРєРё
+            int    _Samples;     // РєРѕР»РёС‡РµСЃС‚РІРѕ С€Р°РіРѕРІ
+            float4 _LightColor;  // С†РІРµС‚ Р»СѓС‡Р° СЃРѕР»РЅС†Р°
+
+            // Р’С‚РѕСЂРѕР№ РёСЃС‚РѕС‡РЅРёРє вЂ” СЃРѕР±СЃС‚РІРµРЅРЅС‹Р№ РїСЂРѕР¶РµРєС‚РѕСЂ РќРџРђ. РЈ РЅРµРіРѕ РµСЃС‚СЊ
+            // РЅР°СЃС‚РѕСЏС‰Р°СЏ РїРѕР·РёС†РёСЏ РІ РјРёСЂРµ (РІ РѕС‚Р»РёС‡РёРµ РѕС‚ СЃРѕР»РЅС†Р°), РїРѕСЌС‚РѕРјСѓ
+            // СЌРєСЂР°РЅРЅР°СЏ С‚РѕС‡РєР° РґР»СЏ РЅРµРіРѕ СЃС‡РёС‚Р°РµС‚СЃСЏ РЅР°РїСЂСЏРјСѓСЋ РІ C#, Р±РµР· С‚СЂСЋРєР°
+            // "С‚РѕС‡РєР° РґР°Р»РµРєРѕ РїРѕ РЅР°РїСЂР°РІР»РµРЅРёСЋ СЃРІРµС‚Р°".
+            float  _HasLight2;   // 0 РёР»Рё 1 вЂ” РІРєР»СЋС‡С‘РЅ Р»Рё РІС‚РѕСЂРѕР№ РёСЃС‚РѕС‡РЅРёРє
+            float2 _LightPos2;
+            float4 _LightColor2;
+
+            float3 ComputeRay(float2 texCoord, float2 lightPos, float4 lightColor)
             {
-                float2 texCoord = i.uv;
-
-                // направление от текущего пикселя к источнику света
-                float2 delta = (_LightPos - texCoord) * (_Density / _Samples);
-
+                float2 delta = (lightPos - texCoord) * (_Density / _Samples);
                 float illuminationDecay = 1.0;
-                fixed4 col = 0;
+                float3 col = 0;
 
-                // проходимся от пикселя к источнику света и накапливаем "свет"
-                for(int s = 0; s < _Samples; s++)
+                for (int s = 0; s < _Samples; s++)
                 {
                     texCoord += delta;
-
-                    fixed4 sample = tex2D(_MainTex, texCoord);
-
-                    // берём яркость (luminance) пикселя
+                    float4 sample = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, texCoord);
                     float lum = dot(sample.rgb, float3(0.3, 0.59, 0.11));
-
-                    sample = lum * _LightColor;           // окрашиваем в цвет света
-                    sample *= illuminationDecay * _Weight;
-
-                    col += sample;
+                    float3 c = lum * lightColor.rgb;
+                    c *= illuminationDecay * _Weight;
+                    col += c;
                     illuminationDecay *= _Decay;
                 }
-
-                fixed4 original = tex2D(_MainTex, i.uv);
-                return original + col * _Exposure;       // исходное изображение + лучи
+                return col;
             }
-            ENDCG
+
+            float4 Frag(Varyings input) : SV_Target
+            {
+                float2 uv = input.texcoord;
+                float3 col = ComputeRay(uv, _LightPos, _LightColor);
+
+                if (_HasLight2 > 0.5)
+                    col += ComputeRay(uv, _LightPos2, _LightColor2);
+
+                float4 original = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, uv);
+                return original + float4(col, 0) * _Exposure;
+            }
+            ENDHLSL
         }
     }
 }
