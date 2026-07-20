@@ -3,14 +3,14 @@ using UnityEngine;
 [RequireComponent(typeof(Light))]
 public class CookieCausticsMotion : MonoBehaviour
 {
-    [Header("Амплитуда отклонения (в градусах)")]
-    public float amplitude = 2f;
+    [Header("РђРјРїР»РёС‚СѓРґР° РєРѕР»РµР±Р°РЅРёСЏ (РІ РіСЂР°РґСѓСЃР°С…)")]
+    public float amplitude = 1f;
 
-    [Header("Скорость изменения (чем больше, тем быстрее шевелится)")]
-    public float speed = 0.2f;
+    [Header("РЎРєРѕСЂРѕСЃС‚СЊ РєРѕР»РµР±Р°РЅРёСЏ (С‡РµРј РјРµРЅСЊС€Рµ, С‚РµРј РјРµРґР»РµРЅРЅРµРµ РґРІРёР¶РµРЅРёРµ)")]
+    public float speed = 0.04f;
 
-    [Header("Немного общего вращения, чтобы рисунок не был статичным")]
-    public float slowRotationSpeed = 2f;  
+    [Header("РЎРєРѕСЂРѕСЃС‚СЊ РѕР±С‰РµРіРѕ РІСЂР°С‰РµРЅРёСЏ, С‡С‚РѕР±С‹ СЂРёСЃСѓРЅРѕРє РЅРµ СЃС‚РѕСЏР» РЅР° РјРµСЃС‚Рµ")]
+    public float slowRotationSpeed = 0.3f;
 
     private Vector3 baseRotation;
 
@@ -23,8 +23,8 @@ public class CookieCausticsMotion : MonoBehaviour
     {
         float t = Time.time * speed;
 
-        float noiseX = (Mathf.PerlinNoise(t, 0f) - 0.5f) * 2f;   
-        float noiseY = (Mathf.PerlinNoise(0f, t) - 0.5f) * 2f;   
+        float noiseX = (Mathf.PerlinNoise(t, 0f) - 0.5f) * 2f;
+        float noiseY = (Mathf.PerlinNoise(0f, t) - 0.5f) * 2f;
 
         float x = baseRotation.x + noiseX * amplitude;
         float y = baseRotation.y + noiseY * amplitude;

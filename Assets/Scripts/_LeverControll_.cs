@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 
 // Raycast от контроллеров + emission подсветка + VR Grab (grip + движение руки)
+// + щелчок в нейтраль (deadzone — «мёртвая зона» вокруг центра, угол 0 = ноль тяги)
 public class LeverController : MonoBehaviour
 {
     public enum LeverAxis { Forward, Vertical, Yaw }
@@ -38,6 +39,12 @@ public class LeverController : MonoBehaviour
     public float grabRange = 0.25f;
     [Tooltip("По какой оси считать движение руки: Camera Forward — относительно взгляда")]
     public bool useCameraForward = true;
+
+    [Header("Нейтральный дедзон (deadzone — «мёртвая зона»)")]
+    [Tooltip("Рычаг стоит вертикально (угол = 0) в нейтральном положении — это и есть ноль тяги. " +
+             "Если текущий угол рычага оказывается ближе к 0, чем это значение (в градусах), " +
+             "он защёлкивается ровно на 0 — как щелчок в центральный паз джойстика/рычага газа.")]
+    public float neutralDeadzoneDeg = 6f;
 
     private float _angle;
     private bool _hoveredLeft;
@@ -165,6 +172,7 @@ public class LeverController : MonoBehaviour
             float dirSign = invert ? -1f : 1f;
             _angle = _grabStartAngle + t * (maxAngle - minAngle) * 0.5f * dirSign;
             _angle = Mathf.Clamp(_angle, minAngle, maxAngle);
+            ПрищёлкнутьКНейтрали();
         }
         else
         {
@@ -184,6 +192,7 @@ public class LeverController : MonoBehaviour
             float dirSign = invert ? -1f : 1f;
             _angle += input * 60f * Time.deltaTime * dirSign;
             _angle = Mathf.Clamp(_angle, minAngle, maxAngle);
+            ПрищёлкнутьКНейтрали();
         }
 
         transform.localEulerAngles = axis == LeverAxis.Yaw
@@ -193,6 +202,15 @@ public class LeverController : MonoBehaviour
         float normalized = Mathf.InverseLerp(minAngle, maxAngle, _angle) * 2f - 1f;
         if (invert) normalized *= -1f;
         WriteToInput(normalized);
+    }
+
+    // Если рычаг оказался в пределах нейтрального дедзона вокруг центра (угол 0,
+    // рычаг стоит вертикально) — щёлкаем его ровно в 0, как в реальный паз нейтрали,
+    // и тяга по этой оси становится точно нулевой (без дрожания около нуля).
+    void ПрищёлкнутьКНейтрали()
+    {
+        if (Mathf.Abs(_angle) <= neutralDeadzoneDeg)
+            _angle = 0f;
     }
 
     void StartGrab(Transform hand)

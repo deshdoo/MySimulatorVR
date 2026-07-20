@@ -1,0 +1,30 @@
+{
+  "name": "com.unity.ai.assistant",
+  "displayName": "Assistant",
+  "version": "2.6.0-pre.1",
+  "unity": "6000.0",
+  "description": "Assistant is a generative AI tool integrated into the Unity Editor to explore ideas, answer questions, and perform actions directly in the project. Use natural-language prompts to interact with Assistant in a conversation-based interface. Depending on the mode you choose, Assistant can either provide guidance or take action in your scene and assets.\n\nAsk\nFocuses on explanation and guidance. Assistant answers questions, suggests workflows, and inspects your project using read-only tools without modifying your content.\n\nAgent\nFocuses on action. Assistant can create, modify, or remove objects and assets by calling the Unity Editor tools. All actions respect your permission settings and require approval when needed.\n\nAssistant is designed to be project-aware, helping you work more efficiently without leaving the Unity Editor. It also provides tools for adding generative AI to Unity asset workflows.",
+  "dependencies": {
+    "com.unity.nuget.newtonsoft-json": "3.2.1",
+    "com.unity.modules.unitywebrequest": "1.0.0",
+    "com.unity.modules.uielements": "1.0.0",
+    "com.unity.serialization": "3.1.1",
+    "com.unity.2d.sprite": "1.0.0",
+    "com.unity.cloud.gltfast": "6.14.1",
+    "com.unity.mathematics": "1.3.2"
+  },
+  "unityRelease": "60f1",
+  "_upm": {
+    "changelog": "### Changed\n\n- Moved Profiler Assistant to Skills implementation.\n- Update Plan mode tool descriptions.\n\n### Fixed\n\n- Added tooltip to conversation context counter.\n- Fixed a few icons that were not dark enough in light mode.\n- GetConsoleLogs tool timestamps.\n- MCP Server settings subtitle text overflow.\n- NullReferenceException in Chat Window.\n- Preferences search bar now finds matches on the Assistant tab.\n- Some image types cannot be used as assistant attachments.\n- Tool renderer header icons getting squashed when tool call title is too long."
+  },
+  "upmCi": {
+    "footprint": "2e096773c3bd0c3ba4d3e647aff138b5fb7d6895"
+  },
+  "documentationUrl": "https://docs.unity3d.com/Packages/com.unity.ai.assistant@2.6/manual/index.html",
+  "repository": {
+    "url": "https://github.cds.internal.unity3d.com/unity/muse-editor.git",
+    "type": "git",
+    "revision": "8ed170ceb2054a0d67276099617cd030eb182af2"
+  },
+  "_fingerprint": "fc16ca46e2086e9df0eb56acc06ff8a649777879"
+}
