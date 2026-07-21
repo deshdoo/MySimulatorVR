@@ -38,7 +38,19 @@ public class RovAutopilot : MonoBehaviour
         float _integral, _prevError;
         bool _hasPrev;
 
-        public void Reset() { _integral = 0f; _prevError = 0f; _hasPrev = false; }
+        // Вклад каждого звена в последний посчитанный выход — для графиков.
+        // Именно по ним видно, кто из трёх звеньев за что отвечает:
+        // П тянет к уставке пропорционально ошибке, И добивает статическую
+        // ошибку (например, остаточную плавучесть), Д гасит скорость подхода.
+        public float ВкладП { get; private set; }
+        public float ВкладИ { get; private set; }
+        public float ВкладД { get; private set; }
+
+        public void Reset()
+        {
+            _integral = 0f; _prevError = 0f; _hasPrev = false;
+            ВкладП = ВкладИ = ВкладД = 0f;
+        }
 
         public float Update(float error, float dt)
         {
@@ -46,7 +58,11 @@ public class RovAutopilot : MonoBehaviour
             float deriv = _hasPrev && dt > 0f ? (error - _prevError) / dt : 0f;
             _prevError = error;
             _hasPrev = true;
-            return kp * error + ki * _integral + kd * deriv;
+
+            ВкладП = kp * error;
+            ВкладИ = ki * _integral;
+            ВкладД = kd * deriv;
+            return ВкладП + ВкладИ + ВкладД;
         }
     }
 
@@ -61,9 +77,17 @@ public class RovAutopilot : MonoBehaviour
     [Header("ПИД глубины (вертикаль)")]
     public Pid depthPid = new Pid { kp = 0.8f, ki = 0.1f, kd = 0.5f, integralClamp = 2f };
 
-    [Header("Гашение продольного сноса")]
-    [Tooltip("Коэффициент торможения продольной скорости. Меньше = допускает лёгкий снос/покачивание.")]
+    [Header("Гашение сноса")]
+    [Tooltip("Коэффициент торможения ПРОДОЛЬНОЙ скорости. Меньше = допускает лёгкий снос/покачивание.")]
     public float surgeBrakeGain = 0.8f;
+    [Tooltip("Коэффициент торможения БОКОВОЙ скорости (лаг). Без него течение под углом к курсу " +
+             "сносит аппарат вбок, и парировать это нечем — продольная тяга тут не помогает.")]
+    public float swayBrakeGain = 0.8f;
+
+    [Header("Выход на режим при включении")]
+    [Tooltip("За сколько секунд автопилот выходит на полную власть после нажатия кнопки. " +
+             "0 — сразу (рывок). Реальные движители тоже раскручиваются не мгновенно.")]
+    public float времяВыходаНаРежим = 2.5f;
 
     [Header("Мягкость отклика (глубина/снос)")]
     [Range(0.05f, 1f)]
@@ -74,14 +98,30 @@ public class RovAutopilot : MonoBehaviour
 
     public bool Engaged { get; private set; }
 
+    // --- Телеметрия контура регулирования (для графиков на втором мониторе) ---
+    // Классическая тройка ТАУ: уставка, ошибка регулирования, управляющее воздействие.
+    // Уставка глубины, м (то, что держим).
+    public float TargetDepth_m => Mathf.Max(0f, -_targetWorldY);
+    // Ошибка регулирования e = уставка − факт, м. e > 0 — аппарат всплыл выше уставки.
+    public float DepthError_m { get; private set; }
+    // Управляющее воздействие u на вертикальную тягу, доля −1..1.
+    public float VerticalCommand => _appliedVert;
+    // Разложение выхода ПИД глубины на звенья (в тех же единицах, что и u).
+    public float ВкладП => depthPid.ВкладП;
+    public float ВкладИ => depthPid.ВкладИ;
+    public float ВкладД => depthPid.ВкладД;
+
     private Rigidbody _rb;
     private float _targetWorldY;
-    private float _appliedVert, _appliedFwd;
+    private float _appliedVert, _appliedFwd, _appliedLat;
+    private float _рампа;   // 0..1, плавный ввод автопилота в работу после включения
 
     void Awake()
     {
         Instance = this;
         _rb = GetComponent<Rigidbody>();
+        // Статика переживает вход в Play Mode, если отключён Domain Reload — сбрасываем явно.
+        RovSystems.depthHoldActive = false;
     }
 
     void OnDestroy() { if (Instance == this) Instance = null; }
@@ -92,9 +132,14 @@ public class RovAutopilot : MonoBehaviour
     {
         Engaged = true;
         _targetWorldY = transform.position.y;   // держим текущую глубину
+        // Публикуем режим в RovSystems — оттуда его читает UI пульта (SystemStatusDisplay).
+        RovSystems.depthHoldActive   = true;
+        RovSystems.depthHoldTarget_m = Mathf.Max(0f, -_targetWorldY);
         depthPid.Reset();
-        _appliedVert = DroneInput.vertical;
+        _рампа = 0f;                        // власть автопилота нарастает с нуля
+        _appliedVert = DroneInput.vertical; // подхватываем текущее положение рычагов
         _appliedFwd = DroneInput.forward;
+        _appliedLat = DroneInput.lateral;
 
         Debug.Log($"[RovAutopilot] ВКЛ. Выравниваю горизонт (тангаж={NormalizeAngle(transform.eulerAngles.x):F1}°, " +
                   $"крен={NormalizeAngle(transform.eulerAngles.z):F1}°), курс оставляю={transform.eulerAngles.y:F1}°, держим Y={_targetWorldY:F2}");
@@ -103,6 +148,9 @@ public class RovAutopilot : MonoBehaviour
     public void Disengage()
     {
         Engaged = false;
+        RovSystems.depthHoldActive = false;
+        DepthError_m = 0f;
+        DroneInput.lateral = 0f;
         DroneInput.forward = 0f;
         DroneInput.vertical = 0f;
         DroneInput.yaw = 0f;
@@ -112,6 +160,14 @@ public class RovAutopilot : MonoBehaviour
     {
         if (!Engaged) return;
         float dt = Time.fixedDeltaTime;
+
+        // Плавный ввод в работу. SmoothStep, а не линейный рост: начало и конец
+        // разгона получаются мягкими, без ступеньки в момент выхода на полную власть.
+        if (времяВыходаНаРежим > 0.01f)
+            _рампа = Mathf.Clamp01(_рампа + dt / времяВыходаНаРежим);
+        else
+            _рампа = 1f;
+        float k = Mathf.SmoothStep(0f, 1f, _рампа);
 
         // --- Выравнивание крена И тангажа прямым моментом (курс не трогаем) ---
         // Cross(up, worldUp): вектор коррекции наклона (|.| = sin наклона), не
@@ -130,23 +186,31 @@ public class RovAutopilot : MonoBehaviour
         Vector3 angVel = _rb.angularVelocity;
         Vector3 tiltRate = angVel - Vector3.Project(angVel, Vector3.up);
         levelTorque -= tiltRate * levelDamping;
-        _rb.AddTorque(levelTorque, ForceMode.Acceleration);
+        _rb.AddTorque(levelTorque * k, ForceMode.Acceleration);
 
         // --- Глубина -> _targetWorldY (ПИД) ---
         float yError = _targetWorldY - transform.position.y;
-        float vertCmd = Mathf.Clamp(depthPid.Update(yError, dt), -maxAuthority, maxAuthority);
+        // В терминах глубины ошибка имеет обратный знак: глубина = −Y.
+        DepthError_m = -yError;
+        float vertCmd = Mathf.Clamp(depthPid.Update(yError, dt), -maxAuthority, maxAuthority) * k;
 
-        // --- Гашение продольного сноса ---
+        // --- Гашение сноса по обеим горизонтальным осям ---
+        // Течение почти никогда не идёт точно вдоль курса, поэтому гасить только
+        // продольную составляющую недостаточно: боковая уводит аппарат вбок.
         float surgeVel = Vector3.Dot(_rb.linearVelocity, transform.forward);
-        float fwdCmd = Mathf.Clamp(-surgeBrakeGain * surgeVel, -maxAuthority, maxAuthority);
+        float swayVel  = Vector3.Dot(_rb.linearVelocity, transform.right);
+        float fwdCmd = Mathf.Clamp(-surgeBrakeGain * surgeVel, -maxAuthority, maxAuthority) * k;
+        float latCmd = Mathf.Clamp(-swayBrakeGain  * swayVel,  -maxAuthority, maxAuthority) * k;
 
         // --- Плавное подведение команд тяги ---
         float s = 1f - Mathf.Exp(-responseSmoothing * dt);
         _appliedVert = Mathf.Lerp(_appliedVert, vertCmd, s);
         _appliedFwd = Mathf.Lerp(_appliedFwd, fwdCmd, s);
+        _appliedLat = Mathf.Lerp(_appliedLat, latCmd, s);
 
         DroneInput.vertical = _appliedVert;
         DroneInput.forward = _appliedFwd;
+        DroneInput.lateral = _appliedLat;
         DroneInput.yaw = 0f;   // курс не трогаем — рысканье не командуем
     }
 

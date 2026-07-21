@@ -23366,6 +23366,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 141dd5f57644ec24a863f6f6b4bb718d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RovSystemsSimulator
+  "\u0423\u0440\u043E\u0432\u0435\u043D\u044C\u041F\u043E\u0432\u0435\u0440\u0445\u043D\u043E\u0441\u0442\u0438\u0412\u043E\u0434\u044B": 100
   "\u0401\u043C\u043A\u043E\u0441\u0442\u044C\u0410\u041A\u0411": 16
   "\u041D\u0430\u043F\u0440\u044F\u0436\u0435\u043D\u0438\u0435\u041F\u043E\u043B\u043D\u043E\u0433\u043E\u0417\u0430\u0440\u044F\u0434\u0430": 25.2
   "\u041D\u0430\u043F\u0440\u044F\u0436\u0435\u043D\u0438\u0435\u0420\u0430\u0437\u0440\u044F\u0436\u0435\u043D\u043D\u043E\u0439": 21
@@ -23448,13 +23449,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b1f4861b9612041429747040fa940cec, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RovAutopilot
-  targetHeading_deg: 0
-  headingPid:
-    kp: 0.018
-    ki: 0
-    kd: 0.006
-    integralClamp: 30
-  invertYaw: 0
+  rollStrength: 4
+  pitchStrength: 4
+  levelDamping: 2.5
   depthPid:
     kp: 0.8
     ki: 0.1

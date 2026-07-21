@@ -31,8 +31,10 @@ public class HUDDisplay : MonoBehaviour
     void Update()
     {
         if (rov == null) return;
-        float depth = Mathf.Max(0f, -rov.position.y);
-        if (depthText   != null) depthText.text   = $"DEPTH  {depth:F1} m";
+        // Глубину берём из общей шины, а не считаем заново: уровень поверхности
+        // воды задаётся в RovSystemsSimulator, и вторая формула здесь разошлась бы
+        // с приборами и графиками.
+        if (depthText   != null) depthText.text   = $"DEPTH  {RovSystems.depth_m:F1} m";
         if (headingText != null) headingText.text  = $"HDG  {rov.eulerAngles.y:F0}°";
         if (forwardText != null) forwardText.text  = $"FWD  {DroneInput.forward * 100f:F0}%";
     }

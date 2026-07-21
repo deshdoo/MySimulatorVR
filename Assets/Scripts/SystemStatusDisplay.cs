@@ -38,6 +38,10 @@ public class SystemStatusDisplay : MonoBehaviour
     [Header("Режим управления")]
     public TMP_Text КнопкаРучной;
     public TMP_Text КнопкаУдержание;
+    [Tooltip("Подложка кнопки «Ручной» — Image (Graphic)")]
+    public Graphic ФонРучной;
+    [Tooltip("Подложка кнопки «Удержание» — Image (Graphic)")]
+    public Graphic ФонУдержание;
 
     [Header("Цвета статусов")]
     public Color colorOk       = new Color(0.30f, 1.00f, 0.45f);
@@ -49,6 +53,14 @@ public class SystemStatusDisplay : MonoBehaviour
     [Header("Цвет активного режима")]
     public Color modeActiveColor   = new Color(0.30f, 0.85f, 1.00f);
     public Color modeInactiveColor = new Color(0.60f, 0.65f, 0.70f);
+
+    [Header("Фон кнопок режима")]
+    [Tooltip("Фон активной кнопки — бледно-синий")]
+    public Color modeActiveBg   = new Color(0.22f, 0.40f, 0.58f, 1.00f);
+    [Tooltip("Фон неактивной кнопки — тёмный")]
+    public Color modeInactiveBg = new Color(0.07f, 0.09f, 0.12f, 1.00f);
+    [Tooltip("Скорость перетекания цвета, ед/с (0 — переключать мгновенно)")]
+    public float modeFadeSpeed = 8f;
 
     void Update()
     {
@@ -70,6 +82,18 @@ public class SystemStatusDisplay : MonoBehaviour
         bool hold = RovSystems.depthHoldActive;
         if (КнопкаРучной    != null) КнопкаРучной.color    = hold ? modeInactiveColor : modeActiveColor;
         if (КнопкаУдержание != null) КнопкаУдержание.color = hold ? modeActiveColor   : modeInactiveColor;
+
+        // Подложки кнопок: активная — бледно-синяя, неактивная — тёмная
+        FadeTo(ФонРучной,    hold ? modeInactiveBg : modeActiveBg);
+        FadeTo(ФонУдержание, hold ? modeActiveBg   : modeInactiveBg);
+    }
+
+    void FadeTo(Graphic g, Color target)
+    {
+        if (g == null) return;
+        g.color = modeFadeSpeed <= 0f
+            ? target
+            : Color.Lerp(g.color, target, 1f - Mathf.Exp(-modeFadeSpeed * Time.deltaTime));
     }
 
     void Apply(СтрокаСистемы row, SystemState st, string text)

@@ -62,6 +62,7 @@ public static class RovSystems
     public static float pitch_deg          = 0.0f;
     public static float roll_deg           = 0.0f;
     public static float speed_mps          = 0.0f;
+    public static float currentSpeed_mps   = 0.0f;   // скорость течения в точке аппарата
 
     // ---------------- РЕЖИМ УПРАВЛЕНИЯ ----------------
     public static bool  depthHoldActive    = false;
@@ -69,6 +70,12 @@ public static class RovSystems
 
     // ---------------- ТАЙМЕР МИССИИ ----------------
     public static float missionTime_s      = 0.0f;
+
+    // ---------------- ГОТОВНОСТЬ ТЕЛЕМЕТРИИ ----------------
+    // false, пока RovSystemsSimulator не посчитал первый кадр. До этого все
+    // поля выше содержат значения по умолчанию (нули), и записывать их в
+    // регистратор нельзя — на графике это выглядит как реальный провал в 0.
+    public static bool telemetryValid      = false;
 
     // ---------------- ТОЧКА УПРАВЛЕНИЯ (БАЗА) ----------------
     // Мировые координаты пункта управления (кабины), от которого считается

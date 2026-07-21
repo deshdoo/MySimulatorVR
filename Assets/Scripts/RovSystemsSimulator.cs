@@ -14,6 +14,11 @@ using UnityEngine;
 //   10. Таймер миссии
 public class RovSystemsSimulator : MonoBehaviour
 {
+    [Header("Навигация")]
+    [Tooltip("Мировая координата Y уровня воды. Глубина = ЭтотУровень − Y аппарата. " +
+             "Если сцена построена выше нуля, поставь сюда Y поверхности, иначе глубина всегда будет 0.")]
+    public float УровеньПоверхностиВоды = 0f;
+
     [Header("Аккумуляторная батарея")]
     [Tooltip("Номинальная ёмкость, А·ч")]
     public float ЁмкостьАКБ = 16f;
@@ -27,8 +32,16 @@ public class RovSystemsSimulator : MonoBehaviour
     [Header("Токи потребления")]
     [Tooltip("Ток в режиме ожидания, А")]
     public float ТокОжидания = 0.8f;
-    [Tooltip("Максимальный ток движителей, А")]
+    [Tooltip("Суммарный ток ВСЕХ движителей на полной тяге, А")]
     public float ТокДвижителейМакс = 12f;
+    [Tooltip("Сколько движителей создают горизонтальную тягу (ход вперёд и рысканье). " +
+             "В векторной схеме малого ROV это одни и те же 4 движителя.")]
+    public int ГоризонтальныхДвижителей = 4;
+    [Tooltip("Сколько движителей создают вертикальную тягу")]
+    public int ВертикальныхДвижителей = 2;
+    [Tooltip("Показатель степени в связи мощности с тягой. У гребного винта тяга T ∝ n², " +
+             "мощность P ∝ n³, отсюда P ∝ T^1.5. Значение 1 дало бы нефизичную линейную связь.")]
+    public float ПоказательМощностиОтТяги = 1.5f;
     [Tooltip("Ток одного прожектора, А")]
     public float ТокПрожектора = 1.5f;
     [Tooltip("Количество прожекторов")]
@@ -113,6 +126,15 @@ public class RovSystemsSimulator : MonoBehaviour
 
         _reserveCharge_Ah = ЁмкостьРезерв;
         RovSystems.reservePercent = 100f;
+        RovSystems.telemetryValid = false;   // станет true после первого FixedUpdate
+
+        // Частая ошибка настройки: сцена построена выше уровня воды, тогда глубина
+        // всё время зажата в 0 и приборы/графики выглядят «сломанными». Сообщаем сразу.
+        float стартоваяГлубина = УровеньПоверхностиВоды - transform.position.y;
+        if (стартоваяГлубина < 0f)
+            Debug.LogWarning($"[RovSystemsSimulator] НПА стартует ВЫШЕ уровня воды (Y аппарата = {transform.position.y:F1}, " +
+                             $"уровень воды = {УровеньПоверхностиВоды:F1}) — глубина будет всё время 0. " +
+                             $"Поставь «Уровень поверхности воды» примерно в {transform.position.y:F0} или выше.", this);
 
         if (ФормаРазрядаОЦХ == null || ФормаРазрядаОЦХ.length == 0)
         {
@@ -133,20 +155,32 @@ public class RovSystemsSimulator : MonoBehaviour
 
         // 1. Навигация
         Vector3 pos = transform.position;
-        RovSystems.depth_m = Mathf.Max(0f, -pos.y);
+        RovSystems.depth_m = Mathf.Max(0f, УровеньПоверхностиВоды - pos.y);
         Vector3 e = transform.eulerAngles;
         RovSystems.heading_deg = e.y;
         RovSystems.pitch_deg = NormalizeAngle(e.x);
         RovSystems.roll_deg = NormalizeAngle(e.z);
         RovSystems.speed_mps = _rb != null ? _rb.linearVelocity.magnitude : 0f;
 
-        // 2. Ток нагрузки
-        float thrustDemand = Mathf.Abs(DroneInput.forward)
-                           + Mathf.Abs(DroneInput.vertical)
-                           + Mathf.Abs(DroneInput.yaw);
-        thrustDemand = Mathf.Clamp01(thrustDemand / 3f);
+        // 2. Ток нагрузки движителей.
+        // Считаем по ГРУППАМ движителей, а не по «средней команде»: ход вперёд и
+        // рысканье выполняют одни и те же горизонтальные движители (их спрос
+        // складывается и упирается в предел), а вертикальные работают независимо.
+        //
+        // Внутри группы мощность связана с тягой нелинейно: у гребного винта
+        // T ∝ n², P ∝ n³, значит P ∝ T^1.5. Поэтому на половинной тяге движитель
+        // потребляет ≈0.35 от максимума, а не половину.
+        float спросГоризонт  = Mathf.Clamp01(Mathf.Abs(DroneInput.forward)
+                                           + Mathf.Abs(DroneInput.lateral)
+                                           + Mathf.Abs(DroneInput.yaw));
+        float спросВертикаль = Mathf.Clamp01(Mathf.Abs(DroneInput.vertical));
 
-        float I_thrusters = thrustDemand * ТокДвижителейМакс;
+        int всегоДвижителей = Mathf.Max(1, ГоризонтальныхДвижителей + ВертикальныхДвижителей);
+        float I_горизонт  = ТокДвижителейМакс * ГоризонтальныхДвижителей / всегоДвижителей;
+        float I_вертикаль = ТокДвижителейМакс * ВертикальныхДвижителей  / всегоДвижителей;
+
+        float I_thrusters = I_горизонт  * Mathf.Pow(спросГоризонт,  ПоказательМощностиОтТяги)
+                          + I_вертикаль * Mathf.Pow(спросВертикаль, ПоказательМощностиОтТяги);
         float I_lights = RovSystems.lightsOn ? КоличествоПрожекторов * ТокПрожектора : 0f;
 
         // Ток, потребляемый DC-DC преобразователем 12В-шины от главной батареи:
@@ -277,6 +311,9 @@ public class RovSystemsSimulator : MonoBehaviour
 
         // 11. Таймер
         RovSystems.missionTime_s += dt;
+
+        // Все поля посчитаны — с этого момента телеметрию можно писать в графики.
+        RovSystems.telemetryValid = true;
     }
 
     static float NormalizeAngle(float a)

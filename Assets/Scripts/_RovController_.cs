@@ -33,6 +33,9 @@ public class RovController : MonoBehaviour
     public float thrustForward = 80f;
     public float thrustVertical = 40f;
     public float torqueYaw = 10f;
+    [Tooltip("Боковая тяга (лаг), Н. У векторной схемы горизонтальные движители стоят " +
+             "под углом, поэтому вбок аппарат тянет слабее, чем вперёд. 0 — боковой тяги нет.")]
+    public float thrustLateral = 50f;
 
     [Header("Гидродинамическое сопротивление (поступательное)")]
     [Tooltip("Плотность воды, кг/м³")]
@@ -52,6 +55,12 @@ public class RovController : MonoBehaviour
              "моменте torqueYaw была реалистичной для малого ROV (≈20-25°/с), " +
              "а не неестественно быстрой, как при чисто линейном демпфировании Unity.")]
     public float КоэффСопротивленияВращению = 62.5f;
+
+    [Header("Течение")]
+    [Tooltip("Скорость воды в районе работ. Действует не силой, а через относительную " +
+             "скорость в формуле сопротивления — поэтому снос зависит от того, куда и " +
+             "как быстро идёт сам аппарат.")]
+    public WaterCurrent Течение = new WaterCurrent();
 
     [Header("Метацентрическая устойчивость (восстановление крена/тангажа)")]
     [Tooltip("У реального ROV центр плавучести (точка приложения силы Архимеда) находится " +
@@ -83,7 +92,7 @@ public class RovController : MonoBehaviour
     void FixedUpdate()
     {
         _rb.AddRelativeForce(new Vector3(
-            0f,
+            DroneInput.lateral * thrustLateral,
             DroneInput.vertical * thrustVertical,
             DroneInput.forward * thrustForward
         ), ForceMode.Force);
@@ -102,7 +111,19 @@ public class RovController : MonoBehaviour
 
     void ПрименитьСопротивлениеВоды()
     {
-        Vector3 vLocal = transform.InverseTransformDirection(_rb.linearVelocity);
+        // Сопротивление зависит от скорости аппарата ОТНОСИТЕЛЬНО ВОДЫ, а не
+        // относительно мира. Отсюда само собой получается всё поведение в течении:
+        // стоящий на месте аппарат сносит потоком, идущий по течению почти не
+        // встречает сопротивления, идущий против — теряет ход. Прикладывать
+        // «силу течения» напрямую было бы неверно: тогда снос не зависел бы от
+        // скорости самого аппарата.
+        Vector3 vВоды = Течение != null ? Течение.Скорость(transform.position) : Vector3.zero;
+
+        // Публикуем для приборов: скорость течения зависит от точки (придонный
+        // слой), и нужна она именно в точке аппарата.
+        RovSystems.currentSpeed_mps = vВоды.magnitude;
+
+        Vector3 vLocal = transform.InverseTransformDirection(_rb.linearVelocity - vВоды);
 
         float Fx = -0.5f * ПлотностьВоды * Cx * ПлощадьБорт * vLocal.x * Mathf.Abs(vLocal.x);
         float Fy = -0.5f * ПлотностьВоды * Cx * ПлощадьВерх * vLocal.y * Mathf.Abs(vLocal.y);

@@ -18,6 +18,16 @@ public class SessionTimer : MonoBehaviour
 
     void UpdateDisplay()
     {
+        // Поле не назначено в инспекторе. Раньше это сыпало NullReferenceException
+        // каждый кадр и делало консоль нечитаемой. Ругаемся один раз (чтобы объект
+        // было видно и можно было починить) и выключаем компонент.
+        if (targetText == null)
+        {
+            Debug.LogWarning($"[SessionTimer] на «{name}»: не назначен Target Text — таймер выключен.", this);
+            enabled = false;
+            return;
+        }
+
         int hours = Mathf.FloorToInt(elapsedTime / 3600);
         int minutes = Mathf.FloorToInt((elapsedTime % 3600) / 60);
         int seconds = Mathf.FloorToInt(elapsedTime % 60);
