@@ -18,7 +18,9 @@ namespace RovSim.Rov
 		public bool CameraTiltUpPressed { get; private set; }
 		public bool CameraTiltDownPressed { get; private set; }
 		public bool enableDebug;
-		public bool GrabberClosed { get; private set; }
+		// Состояние клешни хранится в общей шине RovSystems.grabberClosed —
+		// один источник истины для клавиши, физической кнопки пульта и панели.
+		public bool GrabberClosed => RovSystems.grabberClosed;
 
 		public void PressClose(InputAction.CallbackContext context)
 		{
@@ -194,9 +196,16 @@ namespace RovSim.Rov
 		{
 			if (!context.started) return; // срабатывает один раз на нажатие
 
-			GrabberClosed = !GrabberClosed;
+			ToggleGrabber();
+		}
 
-			if (enableDebug) Debug.Log("TOGGLE GRABBER -> " + (GrabberClosed ? "CLOSE" : "OPEN"));
+		// Переключить клешню (закрыть/открыть). Тот же источник истины, что и клавиша,
+		// поэтому физическая кнопка пульта (RovPokeButton) синхронна с вводом.
+		public void ToggleGrabber()
+		{
+			RovSystems.grabberClosed = !RovSystems.grabberClosed;
+
+			if (enableDebug) Debug.Log("TOGGLE GRABBER -> " + (RovSystems.grabberClosed ? "CLOSE" : "OPEN"));
 		}
 	}
 }

@@ -10,36 +10,27 @@ namespace RovSim.Rov
         private const float MoveForce = 250f;
         private GameObject _heldObj;
         private GameObject _body;
-        private InputDetector _inputDetector;
         private Rigidbody _temp;
 
-        private void Awake()
-        {
-            _inputDetector = GetComponent<InputDetector>();
-        }
-
-        // Update is called once per frame
+        // Захват завязан на то же состояние клешни, что и анимация с кнопкой:
+        //   клешня сжата (RovSystems.grabberClosed) + касание Grabbable -> берём объект,
+        //   клешня разжата -> отпускаем. Отдельные клавиши close/open больше не нужны.
         private void Update()
         {
-            if (_inputDetector.ClosePressed && canGrab)
+            if (RovSystems.grabberClosed)
             {
-                if (_heldObj is null)
+                if (_heldObj is null && canGrab && _body != null)
                 {
                     PickupObject(_body);
                     _temp = _body.GetComponent<Rigidbody>();
-                    _temp.constraints = RigidbodyConstraints.FreezeAll;
+                    if (_temp != null) _temp.constraints = RigidbodyConstraints.FreezeAll;
                     Debug.Log("picked up");
                 }
-
             }
-
-            if (_inputDetector.OpenPressed)
+            else if (!(_heldObj is null))
             {
-                if (!(_heldObj is null))
-                {
-                    DropObject();
-                    _temp.constraints = RigidbodyConstraints.None;
-                }
+                DropObject();
+                if (_temp != null) _temp.constraints = RigidbodyConstraints.None;
             }
 
             if (!(_heldObj is null))

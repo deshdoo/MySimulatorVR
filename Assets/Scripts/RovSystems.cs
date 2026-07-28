@@ -31,7 +31,8 @@ public static class RovSystems
     // ---------------- ДВИЖИТЕЛИ ----------------
     public static float thrusterTemp_C     = 25.0f;    // температура движителей, °C
     public static float thrusterPower_W    = 0.0f;     // суммарная электрическая мощность движителей, Вт
-    public static SystemState thrusterState = SystemState.OK;
+    public static SystemState thrusterState = SystemState.OK;  // итоговое (температура + урон)
+    public static SystemState thrusterTempState = SystemState.OK; // ТОЛЬКО по температуре (без урона) — для панели
 
     // ---------------- ПРОЖЕКТОРЫ ----------------
     public static bool lightsOn            = false;
@@ -47,6 +48,7 @@ public static class RovSystems
 
     // ---------------- МАНИПУЛЯТОР ----------------
     public static SystemState manipulatorState = SystemState.OK;
+    public static bool grabberClosed = false;   // клешня сжата (ВКЛ) / разжата (ВЫКЛ) — для панели статуса
 
     // ---------------- КОНТРОЛЬ ТЕЧИ ----------------
     public static float hullPressure_kPa   = 101.3f;   // давление, действующее на корпус

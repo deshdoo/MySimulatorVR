@@ -7,7 +7,7 @@ using UnityEngine;
 //   3. Вспомогательная шина 12В — модель DC-DC преобразователя (КПД, выход из регулирования при просадке входа)
 //   4. Резервная АКБ — отдельный контур заряда/разряда (закон Фарадея)
 //   5. Нагрев движителей (тепловой баланс 1-го порядка)
-//   6. Связь по умбиликалу (логарифмическая модель затухания)
+//   6. Связь по умбиликалу (линейное погонное затухание кабеля)
 //   7. Гидростатическое давление и контроль течи (P = rho*g*h)
 //   8. Эхолот через Physics.Raycast
 //   9. Навигационные параметры
@@ -32,8 +32,11 @@ public class RovSystemsSimulator : MonoBehaviour
     [Header("Токи потребления")]
     [Tooltip("Ток в режиме ожидания, А")]
     public float ТокОжидания = 0.8f;
-    [Tooltip("Суммарный ток ВСЕХ движителей на полной тяге, А")]
-    public float ТокДвижителейМакс = 12f;
+    [Tooltip("Суммарный ток ВСЕХ движителей на полной тяге (все оси одновременно), А. " +
+             "Ориентир — Blue Robotics T200 при 16 В: ~17 А на полном ходу, крейсер ~8 А. " +
+             "60 А на 6 движителей ≈ 10 А на движитель; из-за закона P∝T^1.5 мягкий крейсер " +
+             "(~30% хода) берёт ~7 А — согласуется с паспортным крейсерским током.")]
+    public float ТокДвижителейМакс = 60f;
     [Tooltip("Сколько движителей создают горизонтальную тягу (ход вперёд и рысканье). " +
              "В векторной схеме малого ROV это одни и те же 4 движителя.")]
     public int ГоризонтальныхДвижителей = 4;
@@ -62,8 +65,13 @@ public class RovSystemsSimulator : MonoBehaviour
     public float ПорогАварии = 100f;
 
     [Header("Связь по умбиликалу")]
-    [Tooltip("Опорная дистанция, м (на ней RSSI = 0 дБ)")]
-    public float ОпорнаяДистанция = 5f;
+    [Tooltip("Погонное затухание кабеля, дБ на метр. Затухание в проводном/коаксиальном " +
+             "умбиликале линейно по длине (A = α·L), в отличие от радио в свободном " +
+             "пространстве. 0.1 дБ/м — характерная величина для коаксиала на видеочастотах; " +
+             "у оптоволокна на два-три порядка меньше (тогда предел задают потери на разъёмах).")]
+    public float УдельноеЗатуханиеКабеля_дБм = 0.1f;
+    [Tooltip("Постоянные потери на разъёмах/вводах кабеля, дБ (не зависят от длины)")]
+    public float ПотериНаРазъёмах_дБ = 1f;
     [Tooltip("Точка базы — диспетчерская")]
     public Transform База;
     [Tooltip("RSSI предупреждения, дБ")]
@@ -127,6 +135,16 @@ public class RovSystemsSimulator : MonoBehaviour
         _reserveCharge_Ah = ЁмкостьРезерв;
         RovSystems.reservePercent = 100f;
         RovSystems.telemetryValid = false;   // станет true после первого FixedUpdate
+
+        // Сброс накопленного урона: RovSystems — статический класс, и при
+        // выключенном Domain Reload его поля переживают перезапуск Play, из-за
+        // чего аппарат стартовал бы с повреждениями от прошлой сессии. Обнуляем,
+        // чтобы каждый запуск начинался с исправного НПА.
+        RovSystems.thrusterDamage = 0;
+        RovSystems.cameraDamage = 0;
+        RovSystems.manipulatorDamage = 0;
+        RovSystems.communicationDamage = 0;
+        RovSystems.lightsDamage = 0;
 
         // Частая ошибка настройки: сцена построена выше уровня воды, тогда глубина
         // всё время зажата в 0 и приборы/графики выглядят «сломанными». Сообщаем сразу.
@@ -245,6 +263,7 @@ public class RovSystemsSimulator : MonoBehaviour
         if (RovSystems.thrusterTemp_C > ПорогАварии)            thrusterPhys = SystemState.Critical;
         else if (RovSystems.thrusterTemp_C > ПорогПредупреждения) thrusterPhys = SystemState.Warning;
         else                                                     thrusterPhys = SystemState.OK;
+        RovSystems.thrusterTempState = thrusterPhys;  // только температура — для панели (отделить нагрев от урона)
         RovSystems.thrusterState = RovSystems.ApplyDamage(thrusterPhys, RovSystems.thrusterDamage);
 
         // 6. Прожекторы
@@ -262,6 +281,12 @@ public class RovSystemsSimulator : MonoBehaviour
         if (UmbilicalCable.Instance != null)
         {
             L = UmbilicalCable.Instance.CableLength;
+            // Защита от разлёта joint-цепи троса: длина физически не может
+            // превышать полностью вытравленный кабель. Если солвер на миг
+            // «взорвал» звено (NaN/бесконечность/гигантское значение) — не
+            // пускаем мусор на приборы (иначе RSSI улетает в дикий минус).
+            float maxL = UmbilicalCable.Instance.totalCableLength_m * 1.5f;
+            if (float.IsNaN(L) || float.IsInfinity(L) || L > maxL) L = maxL;
         }
         else
         {
@@ -272,8 +297,13 @@ public class RovSystemsSimulator : MonoBehaviour
             L = Vector3.Distance(pos, baseP);
         }
         RovSystems.communicationDistance_m = L;
-        if (L < 0.1f) L = 0.1f;
-        RovSystems.rssi_dB = -20f * Mathf.Log10(L / ОпорнаяДистанция);
+        // Погонное затухание проводного кабеля: потери в дБ линейны по длине
+        // (A = α·L + потери_на_разъёмах), а не логарифмичны, как у радиоканала
+        // в свободном пространстве (закон Фрииса). RSSI здесь — уровень сигнала
+        // относительно уровня на выходе передатчика (0 дБ у самого разъёма минус
+        // постоянные потери ввода), поэтому он отрицателен и убывает линейно.
+        if (L < 0f) L = 0f;
+        RovSystems.rssi_dB = -(УдельноеЗатуханиеКабеля_дБм * L + ПотериНаРазъёмах_дБ);
 
         SystemState commPhys;
         if (RovSystems.rssi_dB < ПорогRSSIАвария)      commPhys = SystemState.Critical;
@@ -284,8 +314,10 @@ public class RovSystemsSimulator : MonoBehaviour
         // 8. Камера
         RovSystems.cameraState = RovSystems.ApplyDamage(SystemState.OK, RovSystems.cameraDamage);
 
-        // 8.1. Манипулятор (физическое состояние всегда OK, только урон)
-        RovSystems.manipulatorState = RovSystems.ApplyDamage(SystemState.OK, RovSystems.manipulatorDamage);
+        // 8.1. Манипулятор: зелёный (OK) когда клешня сжата (ВКЛ), серый (Off) когда разжата.
+        // Урон, как и у прочих систем, перекрывает цвет на жёлтый/красный.
+        SystemState manipPhys = RovSystems.grabberClosed ? SystemState.OK : SystemState.Off;
+        RovSystems.manipulatorState = RovSystems.ApplyDamage(manipPhys, RovSystems.manipulatorDamage);
 
         // 9. Эхолот
         RaycastHit hit;

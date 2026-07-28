@@ -65,8 +65,8 @@ public class SystemStatusDisplay : MonoBehaviour
     void Update()
     {
         Apply(Питание,     RovSystems.powerState,         StateName(RovSystems.powerState));
-        Apply(Движители,   RovSystems.thrusterState,      $"{RovSystems.thrusterTemp_C:F0}°C");
-        Apply(Манипулятор, RovSystems.manipulatorState,   StateName(RovSystems.manipulatorState));
+        ApplyДвижители();
+        Apply(Манипулятор, RovSystems.manipulatorState,   RovSystems.grabberClosed ? "ВКЛ" : "ВЫКЛ");
         Apply(Прожекторы,  RovSystems.lightsState,        RovSystems.lightsOn ? "ВКЛ" : "ВЫКЛ");
         Apply(Камера,      RovSystems.cameraState,        StateName(RovSystems.cameraState));
         Apply(Связь,       RovSystems.communicationState, $"{RovSystems.rssi_dB:F0} дБ");
@@ -102,6 +102,34 @@ public class SystemStatusDisplay : MonoBehaviour
         Color c = ColorFor(st);
         if (row.Круг       != null) row.Круг.color = c;
         if (row.Индикатор  != null) { row.Индикатор.color = c; row.Индикатор.text = text; }
+    }
+
+    // Движители — особый случай: строка совмещает ДВА разных повода для тревоги —
+    // перегрев (температура) и механическое повреждение от удара. Показывать их
+    // одним цветом было путано: исправная по нагреву температура (напр. 8°C)
+    // краснела из-за урона и читалась как «перегрев». Теперь разделено:
+    //   есть урон  -> пишем «ПОВРЕЖД.» цветом урона (не показываем температуру);
+    //   урона нет  -> показываем температуру цветом ПО НАГРЕВУ (thrusterTempState).
+    void ApplyДвижители()
+    {
+        if (Движители == null) return;
+
+        SystemState st;
+        string text;
+        if (RovSystems.thrusterDamage > 0)
+        {
+            st = RovSystems.thrusterDamage == 1 ? SystemState.Warning : SystemState.Critical;
+            text = "ПОВРЕЖД.";
+        }
+        else
+        {
+            st = RovSystems.thrusterTempState;
+            text = $"{RovSystems.thrusterTemp_C:F0}°C";
+        }
+
+        Color c = ColorFor(st);
+        if (Движители.Круг      != null) Движители.Круг.color = c;
+        if (Движители.Индикатор != null) { Движители.Индикатор.color = c; Движители.Индикатор.text = text; }
     }
 
     Color ColorFor(SystemState s)

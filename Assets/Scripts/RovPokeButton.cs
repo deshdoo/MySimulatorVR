@@ -26,10 +26,10 @@ using UnityEngine.XR.Interaction.Toolkit.Interactables;
 [DisallowMultipleComponent]
 public class RovPokeButton : MonoBehaviour
 {
-    public enum ButtonAction { None, ToggleLights, ToggleAutopilot }
+    public enum ButtonAction { None, ToggleLights, ToggleAutopilot, ToggleGrabber }
 
     [Header("Действие кнопки")]
-    [Tooltip("ToggleLights — прожекторы (RovSystems.lightsOn). ToggleAutopilot — удержание (RovAutopilot). None — только латч + onPressed.")]
+    [Tooltip("ToggleLights — прожекторы (RovSystems.lightsOn). ToggleAutopilot — удержание (RovAutopilot). ToggleGrabber — клешня (RovSystems.grabberClosed). None — только латч + onPressed.")]
     public ButtonAction action = ButtonAction.ToggleLights;
 
     [Tooltip("Доп. действия при нажатии — вешай что угодно в инспекторе (для будущих кнопок).")]
@@ -81,7 +81,10 @@ public class RovPokeButton : MonoBehaviour
             rb.useGravity = false;
         }
 
-        if (movingPart != null) _movingPartHome = movingPart.localPosition;
+        // Если ход кнопки не назначен в инспекторе — двигаем сам объект кнопки,
+        // чтобы вдавливалась любая кнопка, а не только та, где movingPart задан вручную.
+        if (movingPart == null) movingPart = transform;
+        _movingPartHome = movingPart.localPosition;
         if (indicator != null) _indicatorMat = indicator.material;
         if (highlightRenderer != null)
         {
@@ -163,6 +166,7 @@ public class RovPokeButton : MonoBehaviour
         {
             case ButtonAction.ToggleLights:    return RovSystems.lightsOn;
             case ButtonAction.ToggleAutopilot: return RovAutopilot.Instance != null && RovAutopilot.Instance.Engaged;
+            case ButtonAction.ToggleGrabber:   return RovSystems.grabberClosed;
             default:                           return _latchedOn;
         }
     }
@@ -178,6 +182,9 @@ public class RovPokeButton : MonoBehaviour
             case ButtonAction.ToggleAutopilot:
                 if (RovAutopilot.Instance != null) RovAutopilot.Instance.Toggle();
                 else Debug.LogWarning("[RovPokeButton] RovAutopilot не найден в сцене (Instance == null).");
+                break;
+            case ButtonAction.ToggleGrabber:
+                RovSystems.grabberClosed = !RovSystems.grabberClosed;
                 break;
             case ButtonAction.None:
                 _latchedOn = !_latchedOn;
