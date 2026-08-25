@@ -79,6 +79,11 @@ public class TelemetryPanel : MonoBehaviour
     public bool рисоватьРазделители = true;
     public Color цветРазделителя = new Color(0.25f, 0.35f, 0.45f, 0.35f);
 
+    [Header("Шрифт")]
+    [Tooltip("Шрифт панели. Пусто — дефолтный TMP-шрифт. Поставь тот же ofont, что на мониторе систем, " +
+             "чтобы панель была в одном стиле с первым монитором.")]
+    public TMP_FontAsset шрифт;
+
     [Header("Обновление")]
     [Tooltip("Частота обновления чисел, раз/с")]
     public float частотаОбновления = 10f;
@@ -183,7 +188,7 @@ public class TelemetryPanel : MonoBehaviour
 
             // --- подпись слева ---
             var подпись = НовыйТекст("Подпись", строка, рПодписи, цветПодписи,
-                                     TextAlignmentOptions.Left);
+                                     TextAlignmentOptions.Left, шрифт);
             подпись.rectTransform.anchorMin = new Vector2(0f, 0f);
             подпись.rectTransform.anchorMax = new Vector2(0f, 1f);
             подпись.rectTransform.pivot = new Vector2(0f, 0.5f);
@@ -195,7 +200,7 @@ public class TelemetryPanel : MonoBehaviour
             float праваяГраница = с.спарклайн ? доляСпарклайна : 0f;
             var значение = НовыйТекст("Значение", строка, рЗначения,
                                       числоВЦветСтроки ? цвет : цветПодписи,
-                                      TextAlignmentOptions.Right);
+                                      TextAlignmentOptions.Right, шрифт);
             значение.rectTransform.anchorMin = new Vector2(0f, 0f);
             значение.rectTransform.anchorMax = new Vector2(1f - праваяГраница, 1f);
             значение.rectTransform.pivot = new Vector2(0.5f, 0.5f);
@@ -259,10 +264,11 @@ public class TelemetryPanel : MonoBehaviour
     }
 
     static TMP_Text НовыйТекст(string имя, RectTransform родитель, float размер,
-                               Color цвет, TextAlignmentOptions выравнивание)
+                               Color цвет, TextAlignmentOptions выравнивание, TMP_FontAsset шрифт)
     {
         var rt = НовыйУзел(имя, родитель);
         var t = rt.gameObject.AddComponent<TextMeshProUGUI>();
+        if (шрифт != null) t.font = шрифт;
         t.color = цвет;
         t.alignment = выравнивание;
         t.raycastTarget = false;

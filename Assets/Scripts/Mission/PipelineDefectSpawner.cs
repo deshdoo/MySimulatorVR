@@ -30,11 +30,11 @@ public class PipelineDefectSpawner : MonoBehaviour
     [Tooltip("Спавнить только на сегментах, в имени которых есть эта подстрока (напр. «Труба»). " +
              "Так дефекты не сядут на фланцы/болты. Пусто = на любых частях.")]
     public string ФильтрИмениСегмента = "Труба";
-    [Tooltip("Спавнить только на верхней части трубы (чтобы дефекты были видны сверху).")]
+    [Tooltip("Спавнить ТОЛЬКО на верхней части трубы (чтобы дефект и пузыри были видны сверху, а не из-под трубы).")]
     public bool ТолькоВерхняяЧасть = true;
     [Range(0f, 1f)]
-    [Tooltip("Насколько «вверх» должна смотреть поверхность: 0 = вся верхняя половина, 1 = только макушка.")]
-    public float ПорогВерха = 0.3f;
+    [Tooltip("Насколько «вверх» должна смотреть поверхность: 0 = вся верхняя половина, 0.6 ≈ верхняя треть, 1 = только макушка. Выше = строже к макушке.")]
+    public float ПорогВерха = 0.6f;
 
     [Header("Точный режим (для изгибов) — необязательно")]
     [Tooltip("Точки вдоль оси трубы по порядку (≥2). Заполняй ТОЛЬКО если у трубы нет " +
@@ -61,12 +61,20 @@ public class PipelineDefectSpawner : MonoBehaviour
     [Tooltip("Ориентировать дефект нормалью наружу от трубы.")]
     public bool ОриентироватьНаружу = true;
 
+    [Header("Пузыри утечки")]
+    [Tooltip("Автоматически вешать эмиттер пузырей на созданные дефекты Утечка/Трещина " +
+             "(если его ещё нет на префабе). Пузыри всплывают над сколом и служат подсказкой, где течь.")]
+    public bool ПузыриУтечки = true;
+
     // Режим по коллайдерам (основной)
     private Collider[] _коллайдеры;
     private Bounds _габариты;
     // Режим по линии (запасной)
     private Vector3[] _путь;
     private float _радиус;
+    // Слой рендерера трубы — на него сажаем дефекты, чтобы их видела камера вида НПА
+    // (монитор через RenderTexture рендерит обычно только рабочий слой, напр. Underwater).
+    private int _слойТрубы = -1;
 
     void Awake()
     {
@@ -91,7 +99,7 @@ public class PipelineDefectSpawner : MonoBehaviour
 
         while (занято.Count < количество && страховка-- > 0)
         {
-            if (!СлучайнаяТочка(rng, out Vector3 поз, out Vector3 наружу)) continue;
+            if (!СлучайнаяТочка(rng, out Vector3 поз, out Vector3 наружу, out int слой)) continue;
 
             bool близко = false;
             foreach (var p in занято)
@@ -105,7 +113,19 @@ public class PipelineDefectSpawner : MonoBehaviour
             Quaternion пов = (ОриентироватьНаружу && наружу.sqrMagnitude > 1e-4f)
                 ? Quaternion.LookRotation(наружу) : Quaternion.identity;
             Vector3 место = поз + наружу * ПоднятьНадПоверхностью;
-            Instantiate(префаб, место, пов);
+            GameObject экземпляр = Instantiate(префаб, место, пов);
+
+            // ВАЖНО: сажаем дефект на ТОТ ЖЕ слой, что и труба, куда он сел. Камера
+            // вида НПА (что рендерит монитор через RenderTexture) обычно показывает
+            // только рабочий слой (напр. Underwater), а префаб дефекта лежит на
+            // Default — иначе ни трещина, ни пузыри на мониторе не видны.
+            if (слой >= 0) УстановитьСлойРекурсивно(экземпляр, слой);
+
+            // Пузыри утечки: эмиттер сам решит по типу дефекта (Утечка/Трещина —
+            // пузырит, Коррозия/Провис — выключается) и построит ParticleSystem в Start.
+            // Слой дефекта уже выставлен выше — эмиттер наследует его для пузырей.
+            if (ПузыриУтечки && экземпляр.GetComponentInChildren<PipelineLeakEmitter>() == null)
+                экземпляр.AddComponent<PipelineLeakEmitter>();
         }
 
         if (занято.Count == 0)
@@ -131,6 +151,11 @@ public class PipelineDefectSpawner : MonoBehaviour
         }
 
         if (Труба == null) return false;
+
+        // Слой, на котором труба РЕНДЕРИТСЯ (не коллайдера — тот мог остаться на Default,
+        // если капсулы добавляли вручную новыми объектами). Именно этот слой видит монитор.
+        var анкерРендер = Труба.GetComponentInChildren<Renderer>();
+        _слойТрубы = анкерРендер != null ? анкерРендер.gameObject.layer : Труба.gameObject.layer;
 
         // Основной режим: коллайдеры трубы
         var cols = new List<Collider>();
@@ -161,17 +186,18 @@ public class PipelineDefectSpawner : MonoBehaviour
         return true;
     }
 
-    bool СлучайнаяТочка(System.Random rng, out Vector3 поз, out Vector3 наружу)
+    bool СлучайнаяТочка(System.Random rng, out Vector3 поз, out Vector3 наружу, out int слой)
     {
-        if (_коллайдеры != null) return ТочкаНаКоллайдере(rng, out поз, out наружу);
-        return ТочкаНаЛинии(rng, out поз, out наружу);
+        if (_коллайдеры != null) return ТочкаНаКоллайдере(rng, out поз, out наружу, out слой);
+        return ТочкаНаЛинии(rng, out поз, out наружу, out слой);
     }
 
     // Луч сквозь случайную точку габаритов трубы → первая поверхность коллайдера
     // трубы. Даёт точку РОВНО на трубе с корректной нормалью, при любой геометрии.
-    bool ТочкаНаКоллайдере(System.Random rng, out Vector3 поз, out Vector3 наружу)
+    // Возвращает и слой сегмента трубы, куда попал луч (для рендера дефекта).
+    bool ТочкаНаКоллайдере(System.Random rng, out Vector3 поз, out Vector3 наружу, out int слой)
     {
-        поз = Vector3.zero; наружу = Vector3.up;
+        поз = Vector3.zero; наружу = Vector3.up; слой = -1;
 
         Vector3 цель = new Vector3(
             Mathf.Lerp(_габариты.min.x, _габариты.max.x, (float)rng.NextDouble()),
@@ -197,6 +223,7 @@ public class PipelineDefectSpawner : MonoBehaviour
 
                 поз = hit.point;
                 наружу = hit.normal;
+                слой = _слойТрубы;   // на слой рендера трубы — чтобы дефект был виден на мониторе
                 return true;
             }
         }
@@ -204,8 +231,9 @@ public class PipelineDefectSpawner : MonoBehaviour
     }
 
     // Запасной режим: случайная точка вдоль линии + случайный угол вокруг оси.
-    bool ТочкаНаЛинии(System.Random rng, out Vector3 поз, out Vector3 наружу)
+    bool ТочкаНаЛинии(System.Random rng, out Vector3 поз, out Vector3 наружу, out int слой)
     {
+        слой = _слойТрубы;   // задаётся в Подготовить из рендерера трубы (−1, если трубы нет)
         int сег = rng.Next(_путь.Length - 1);
         Vector3 a = _путь[сег], b = _путь[сег + 1];
         float t = (float)rng.NextDouble();
@@ -245,6 +273,14 @@ public class PipelineDefectSpawner : MonoBehaviour
             if (p != null) return p;
         }
         return null;
+    }
+
+    // Ставит слой объекту и всем его потомкам (Unity не делает это за нас).
+    static void УстановитьСлойРекурсивно(GameObject go, int слой)
+    {
+        go.layer = слой;
+        foreach (Transform ч in go.transform)
+            УстановитьСлойРекурсивно(ч.gameObject, слой);
     }
 
     void OnDrawGizmosSelected()

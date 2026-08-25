@@ -51,7 +51,8 @@ public static class RovSystems
     public static bool grabberClosed = false;   // клешня сжата (ВКЛ) / разжата (ВЫКЛ) — для панели статуса
 
     // ---------------- КОНТРОЛЬ ТЕЧИ ----------------
-    public static float hullPressure_kPa   = 101.3f;   // давление, действующее на корпус
+    public static float hullPressure_kPa      = 101.3f;   // ПОКАЗАНИЕ датчика давления (с погрешностью)
+    public static float hullPressureTrue_kPa  = 0.0f;     // истинное гидростатическое давление ρgh (для сравнения на графике)
     public static SystemState leakState    = SystemState.OK;
 
     // ---------------- ЭХОЛОТ ----------------
@@ -59,8 +60,19 @@ public static class RovSystems
     public static bool  hasBottomEcho         = false;
 
     // ---------------- НАВИГАЦИЯ ----------------
+    // depth_m — ПОКАЗАНИЕ датчика глубины (вычислено из измеренного давления, с погрешностью).
+    // depthTrue_m — истинная глубина, которую точно знает движок (для сравнения на графике
+    // «истина vs прибор» и для физических расчётов, которым нужна правда, а не показание).
     public static float depth_m            = 0.0f;
+    public static float depthTrue_m        = 0.0f;
+
+    // Курс: heading_deg — ПОКАЗАНИЕ курсоуказателя (гироскоп + компас, сведённые
+    // комплементарным фильтром). headingTrue_deg — истина (движок). headingGyro_deg —
+    // курс по ОДНОМУ гироскопу без коррекции компасом: он дрейфует, и по нему на
+    // графике видно, зачем нужна коррекция. Заполняет RovHeadingSensor.
     public static float heading_deg        = 0.0f;
+    public static float headingTrue_deg    = 0.0f;
+    public static float headingGyro_deg    = 0.0f;
     public static float pitch_deg          = 0.0f;
     public static float roll_deg           = 0.0f;
     public static float speed_mps          = 0.0f;

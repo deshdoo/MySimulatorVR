@@ -173,8 +173,17 @@ public class RovSystemsSimulator : MonoBehaviour
 
         // 1. Навигация
         Vector3 pos = transform.position;
-        RovSystems.depth_m = Mathf.Max(0f, УровеньПоверхностиВоды - pos.y);
+        // ИСТИННАЯ глубина — то, что движок знает точно. Показание датчика depth_m
+        // формирует уже RovDepthSensor (давление → погрешности → обратный расчёт).
+        // Здесь ставим depth_m = истине как безопасное значение по умолчанию: если
+        // компонента-датчика в сцене нет, всё работает ровно как раньше.
+        RovSystems.depthTrue_m = Mathf.Max(0f, УровеньПоверхностиВоды - pos.y);
+        RovSystems.depth_m = RovSystems.depthTrue_m;
         Vector3 e = transform.eulerAngles;
+        // ИСТИННЫЙ курс — то, что движок знает точно. Показание курсоуказателя
+        // heading_deg формирует RovHeadingSensor (гироскоп с дрейфом + компас +
+        // фильтр). По умолчанию (без датчика в сцене) показание = истине.
+        RovSystems.headingTrue_deg = e.y;
         RovSystems.heading_deg = e.y;
         RovSystems.pitch_deg = NormalizeAngle(e.x);
         RovSystems.roll_deg = NormalizeAngle(e.z);
@@ -333,10 +342,17 @@ public class RovSystemsSimulator : MonoBehaviour
         }
 
         // 10. Гидростатическое давление и течь
-        float P_water_Pa = ПлотностьВоды * 9.81f * RovSystems.depth_m;
-        RovSystems.hullPressure_kPa = P_water_Pa * 0.001f;
+        // ИСТИННОЕ давление на корпус P = ρ·g·h (по истинной глубине) — это физика,
+        // а не показание прибора. Датчик давления (RovDepthSensor) возьмёт эту истину,
+        // добавит погрешности и запишет своё показание в hullPressure_kPa. По умолчанию
+        // (без датчика в сцене) показание = истине.
+        float P_water_Pa = ПлотностьВоды * 9.81f * RovSystems.depthTrue_m;
+        RovSystems.hullPressureTrue_kPa = P_water_Pa * 0.001f;
+        RovSystems.hullPressure_kPa = RovSystems.hullPressureTrue_kPa;
 
-        float depthRatio = RovSystems.depth_m / МаксГлубина;
+        // Ранг корпуса по глубине считаем от ИСТИННОЙ глубины: прочность корпуса
+        // не зависит от того, что показывает прибор.
+        float depthRatio = RovSystems.depthTrue_m / МаксГлубина;
         if (depthRatio > 1.0f) RovSystems.leakState = SystemState.Critical;
         else if (depthRatio > 0.9f) RovSystems.leakState = SystemState.Warning;
         else RovSystems.leakState = SystemState.OK;

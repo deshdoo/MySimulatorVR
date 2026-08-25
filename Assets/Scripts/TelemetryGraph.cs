@@ -62,6 +62,11 @@ public class TelemetryGraph : MaskableGraphic
     [Header("Что рисуем")]
     public List<Серия> Серии = new List<Серия>();
 
+    [Header("Шрифт")]
+    [Tooltip("Шрифт подписей (заголовок, числа оси, значения). Пусто — дефолтный TMP-шрифт. " +
+             "Поставь тот же ofont, что на мониторе систем, чтобы графики были в одном стиле с первым монитором.")]
+    public TMP_FontAsset шрифт;
+
     [Header("Заголовок")]
     [Tooltip("Название графика. Пусто — берётся имя первой серии.")]
     public string заголовок = "";
@@ -327,6 +332,7 @@ public class TelemetryGraph : MaskableGraphic
         rt.anchoredPosition = позиция;
 
         var t = go.AddComponent<TextMeshProUGUI>();
+        if (шрифт != null) t.font = шрифт;
         t.fontSize = размер;
         t.color = цвет;
         t.alignment = выравнивание;

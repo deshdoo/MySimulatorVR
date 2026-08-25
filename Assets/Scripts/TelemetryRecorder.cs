@@ -29,7 +29,7 @@ public enum TelemetryChannel
     Курс,               // град
     Тангаж,             // град
     Крен,               // град
-    Скорость,           // м/с
+    Скорость,           // уз (узлы; в буфер пишется уже переведённое из м/с — морская единица скорости)
     ВысотаНадДном,      // м
 
     // Энергетика и нагрев
@@ -50,7 +50,11 @@ public enum TelemetryChannel
     ВкладП,             // пропорциональная составляющая выхода ПИД глубины
     ВкладИ,             // интегральная составляющая
     ВкладД,             // дифференциальная составляющая
-    СкоростьТечения,    // м/с, скорость воды в точке аппарата
+    СкоростьТечения,    // уз (узлы; переведено из м/с), скорость воды в точке аппарата
+    ГлубинаИстина,      // м, истинная глубина (движок) — для сравнения с показанием датчика
+    ДавлениеИстина,     // кПа, истинное гидростатическое давление ρgh — для сравнения с датчиком
+    КурсИстина,         // град, истинный курс (движок)
+    КурсГиро,           // град, курс по ОДНОМУ гироскопу без коррекции компасом (дрейфует)
 }
 
 [DisallowMultipleComponent]
@@ -69,6 +73,12 @@ public class TelemetryRecorder : MonoBehaviour
     private int _head;            // куда пишем следующий сэмпл
     private int _count;           // сколько накоплено (<= _capacity)
     private float _nextSampleTime;
+
+    // Перевод скорости из СИ (м/с) в узлы: 1 м/с = 1.943844 узла (морская миля/час).
+    // Скорость аппарата и течения на приборах даём в узлах — как принято на морской
+    // и подводной технике. В буфер пишем уже переведённое, поэтому и число, и
+    // спарклайн, и любой график канала согласованы в одних единицах.
+    private const float КоэфУзлы = 1.9438445f;
 
     /// <summary>Сколько сэмплов доступно (0.._capacity).</summary>
     public int Count => _count;
@@ -134,7 +144,7 @@ public class TelemetryRecorder : MonoBehaviour
         Put(TelemetryChannel.Курс,          RovSystems.heading_deg);
         Put(TelemetryChannel.Тангаж,        RovSystems.pitch_deg);
         Put(TelemetryChannel.Крен,          RovSystems.roll_deg);
-        Put(TelemetryChannel.Скорость,      RovSystems.speed_mps);
+        Put(TelemetryChannel.Скорость,      RovSystems.speed_mps * КоэфУзлы);   // м/с → узлы
         Put(TelemetryChannel.ВысотаНадДном, RovSystems.hasBottomEcho ? RovSystems.altitudeAboveBottom_m : float.NaN);
 
         Put(TelemetryChannel.ЗарядАКБ,              RovSystems.batteryPercent);
@@ -143,9 +153,16 @@ public class TelemetryRecorder : MonoBehaviour
         Put(TelemetryChannel.МощностьДвижителей,    RovSystems.thrusterPower_W);
         Put(TelemetryChannel.ТемператураДвижителей, RovSystems.thrusterTemp_C);
 
-        Put(TelemetryChannel.СкоростьТечения,  RovSystems.currentSpeed_mps);
+        Put(TelemetryChannel.СкоростьТечения,  RovSystems.currentSpeed_mps * КоэфУзлы);   // м/с → узлы
         Put(TelemetryChannel.ДавлениеНаКорпус, RovSystems.hullPressure_kPa);
         Put(TelemetryChannel.КачествоСвязи,    RovSystems.rssi_dB);
+
+        // Истинные значения — рядом с показаниями датчика, чтобы график мог
+        // нарисовать «истина vs прибор» и было видно шум/смещение/квантование.
+        Put(TelemetryChannel.ГлубинаИстина,  RovSystems.depthTrue_m);
+        Put(TelemetryChannel.ДавлениеИстина, RovSystems.hullPressureTrue_kPa);
+        Put(TelemetryChannel.КурсИстина,     RovSystems.headingTrue_deg);
+        Put(TelemetryChannel.КурсГиро,       RovSystems.headingGyro_deg);
 
         // Продвигаем кольцо ОДИН раз на весь сэмпл, после записи всех каналов.
         _head = (_head + 1) % _capacity;
@@ -175,6 +192,7 @@ public class TelemetryRecorder : MonoBehaviour
         switch (ch)
         {
             case TelemetryChannel.Глубина:
+            case TelemetryChannel.ГлубинаИстина:
             case TelemetryChannel.УставкаГлубины:
             case TelemetryChannel.ОшибкаРегулирования:
             case TelemetryChannel.ВысотаНадДном:          return "м";
@@ -183,16 +201,19 @@ public class TelemetryRecorder : MonoBehaviour
             case TelemetryChannel.ВкладИ:
             case TelemetryChannel.ВкладД:                 return "";
             case TelemetryChannel.Курс:
+            case TelemetryChannel.КурсИстина:
+            case TelemetryChannel.КурсГиро:
             case TelemetryChannel.Тангаж:
             case TelemetryChannel.Крен:                   return "°";
             case TelemetryChannel.Скорость:
-            case TelemetryChannel.СкоростьТечения:        return "м/с";
+            case TelemetryChannel.СкоростьТечения:        return "уз";
             case TelemetryChannel.ЗарядАКБ:               return "%";
             case TelemetryChannel.НапряжениеШины:         return "В";
             case TelemetryChannel.ТокНагрузки:            return "А";
             case TelemetryChannel.МощностьДвижителей:     return "Вт";
             case TelemetryChannel.ТемператураДвижителей:  return "°C";
-            case TelemetryChannel.ДавлениеНаКорпус:       return "кПа";
+            case TelemetryChannel.ДавлениеНаКорпус:
+            case TelemetryChannel.ДавлениеИстина:         return "кПа";
             case TelemetryChannel.КачествоСвязи:          return "дБ";
             default:                                      return "";
         }
