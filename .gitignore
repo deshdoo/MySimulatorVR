@@ -25,3 +25,7 @@ make_pdf.py
 # Backups & Unity auto-recovery
 *.bak_*
 Assets/_Recovery/
+
+# Личные пояснялки / доки — не в репозиторий
+Docs/
+LeverController-разбор.pdf
