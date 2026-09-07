@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
+using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
 // Рычаг пульта на штатном XRI-интеракторе (Вариант B).
 //
@@ -37,7 +38,16 @@ public class LeverInteractable : MonoBehaviour
     public bool invert = false;
 
     [Header("VR-захват")]
-    [Tooltip("Сколько метров движения руки = полный ход рычага (minAngle..maxAngle)")]
+    [Tooltip("ВЫКЛ (по умолчанию) — рычаг берётся ЛЮБЫМ интерактором: захватом (щипок/grip) И " +
+             "касанием пальца-poke. Так рычаг можно двигать рукой даже без жеста grab " +
+             "(и в эмуляторе, где poke работает, и на очках). " +
+             "ВКЛ — только захват (палец-poke рычаг не цепляет), строгий режим.")]
+    public bool игнорироватьPoke = false;
+    [Tooltip("ВЫКЛ (по умолчанию) — старое, проверенное управление: угол от линейного смещения " +
+             "руки на grabRange метров. ВКЛ — экспериментальный режим «рука держит рукоятку» " +
+             "(верх рычага следует за рукой); может потребовать invert per-рычаг.")]
+    public bool рукаНаРукоятке = false;
+    [Tooltip("Старый режим (рукаНаРукоятке выкл): сколько метров движения руки = полный ход рычага")]
     public float grabRange = 0.25f;
     [Tooltip("Ось смещения руки считать относительно взгляда камеры")]
     public bool useCameraForward = true;
@@ -54,7 +64,8 @@ public class LeverInteractable : MonoBehaviour
 
     [Header("Клавиатура (тест в редакторе, только пока наведён)")]
     public Key keyPositive = Key.I;
-    public Key keyNegative = Key.K;
+    // K освобождена под Grab эмулятора (там hand-Grab = K) — тест рычага вниз на F1.
+    public Key keyNegative = Key.F1;
     [Tooltip("Только Planar: боковой ход влево/вправо при тесте с клавиатуры.")]
     public Key keyLeft = Key.J;
     public Key keyRight = Key.L;
@@ -68,6 +79,8 @@ public class LeverInteractable : MonoBehaviour
     private Vector3 _grabStartHandPos;
     private float _grabStartAngle;
     private float _grabStartAngleLat; // боковой угол в момент захвата — только для Planar
+    private Vector3 _осьЗахвата;      // мировая ось вращения рычага (режим «рука на рукоятке»)
+    private Vector3 _рукаRefDir;      // направление pivot→рука в плоскости качания на момент захвата
     private Camera _mainCam;
 
     private readonly System.Collections.Generic.List<Material> _mats = new();
@@ -106,10 +119,33 @@ public class LeverInteractable : MonoBehaviour
 
     void OnSelectEntered(SelectEnterEventArgs args)
     {
+        // Рычаг тянут захватом, а не тычком: тыкающий палец (poke-интерактор) его не цепляет —
+        // иначе случайное касание дёргало бы тягу. Хват идёт от grab/direct/near-интерактора
+        // (щипок руки или grip/курок контроллера). Выключается галкой игнорироватьPoke.
+        if (игнорироватьPoke && args.interactorObject is XRPokeInteractor) return;
         _grabHand = args.interactorObject.transform;
         _grabStartHandPos = _grabHand.position;
         _grabStartAngle = _angle;
         _grabStartAngleLat = _angleLat;
+        // Для режима «рука на рукоятке»: запоминаем ось качания и направление на руку.
+        _осьЗахвата = ОсьВращенияМир();
+        _рукаRefDir = ВПлоскости(_grabHand.position - transform.position, _осьЗахвата);
+    }
+
+    // Мировая ось, вокруг которой реально крутится рычаг (согласована с localEulerAngles
+    // ниже): Forward/Vertical — локальный Z, Yaw — локальный X, взятые в системе родителя.
+    Vector3 ОсьВращенияМир()
+    {
+        Vector3 л = (axis == LeverAxis.Yaw) ? Vector3.right : Vector3.forward;
+        Quaternion баз = transform.parent != null ? transform.parent.rotation : Quaternion.identity;
+        return (баз * л).normalized;
+    }
+
+    // Проекция вектора на плоскость качания (перпендикулярную оси), нормализованная.
+    static Vector3 ВПлоскости(Vector3 v, Vector3 ось)
+    {
+        Vector3 p = Vector3.ProjectOnPlane(v, ось);
+        return p.sqrMagnitude > 1e-6f ? p.normalized : Vector3.zero;
     }
 
     void OnSelectExited(SelectExitEventArgs args)
@@ -124,9 +160,21 @@ public class LeverInteractable : MonoBehaviour
 
         if (axis == LeverAxis.Planar) { ОбновитьПланар(hovered); return; }
 
-        if (_grabHand != null)
+        if (_grabHand != null && рукаНаРукоятке)
         {
-            // Прямое VR-управление: угол = функция смещения руки от точки захвата
+            // Рука держит рукоятку: угол рычага = стартовый + УГЛОВОЕ смещение руки вокруг
+            // оси качания. Верх рычага «догоняет» руку, поэтому рука остаётся на рукоятке.
+            Vector3 cur = ВПлоскости(_grabHand.position - transform.position, _осьЗахвата);
+            if (cur != Vector3.zero && _рукаRefDir != Vector3.zero)
+            {
+                float d = Vector3.SignedAngle(_рукаRefDir, cur, _осьЗахвата);
+                float dirSign = invert ? -1f : 1f;
+                _angle = Mathf.Clamp(_grabStartAngle + d * dirSign, minAngle, maxAngle);
+            }
+        }
+        else if (_grabHand != null)
+        {
+            // Старый режим: угол = линейное смещение руки вдоль оси взгляда от точки захвата.
             Vector3 delta = _grabHand.position - _grabStartHandPos;
 
             Vector3 dirAxis;

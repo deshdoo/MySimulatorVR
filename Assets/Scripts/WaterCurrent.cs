@@ -148,7 +148,9 @@ public class WaterCurrent
     {
         if (!RovSystems.hasBottomEcho) return 1f;   // дна не видно — поток невозмущённый
 
-        float отн = Mathf.Clamp01(RovSystems.altitudeAboveBottom_m / ТолщинаПридонногоСлоя);
+        // Пограничный слой — это физика потока, ей нужна ИСТИННАЯ высота над дном,
+        // а не показание эхолота (оно шумит и врёт на ошибке скорости звука).
+        float отн = Mathf.Clamp01(RovSystems.altitudeTrue_m / ТолщинаПридонногоСлоя);
         return Mathf.Pow(отн, 1f / 7f);
     }
 }

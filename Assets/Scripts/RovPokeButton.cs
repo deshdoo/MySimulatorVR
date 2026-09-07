@@ -3,6 +3,7 @@ using UnityEngine.Events;
 using UnityEngine.InputSystem;
 using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
+using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
 // Физическая кнопка-защёлка пульта, нажимаемая пальцем (poke) через XR Interaction Toolkit.
 // Захват/нажатие приходит от штатного интерактора рига "XR Origin Hands" —
@@ -34,6 +35,18 @@ public class RovPokeButton : MonoBehaviour
 
     [Tooltip("Доп. действия при нажатии — вешай что угодно в инспекторе (для будущих кнопок).")]
     public UnityEvent onPressed;
+
+    [Header("Строгий VR-ввод (обычно НЕ нужно)")]
+    [Tooltip("ВЫКЛ (по умолчанию) — нажатие по любому select: поддерживает ОБА режима сразу — " +
+             "руками palcem-poke, контроллером наведение+курок/grab. " +
+             "ВКЛ — кнопку нажимает ТОЛЬКО палец-poke (контроллером курком не нажать).")]
+    public bool толькоPoke = false;
+    [Tooltip("ВКЛ (по умолчанию) — жать в момент КАСАНИЯ кончиком пальца (без продавливания на глубину): " +
+             "касание = нажатие, без усилий. ВЫКЛ — нужно чуть вдавить (poke-select). " +
+             "Действует только для касания пальцем-poke; контроллером курком/grab жмётся как обычно.")]
+    public bool нажиматьПриКасании = true;
+    [Tooltip("Защита от дребезга при нажатии по касанию: минимум секунд между срабатываниями.")]
+    public float антидребезг_с = 0.3f;
 
     [Header("Тест клавишей (в редакторе, без VR)")]
     public Key testKey = Key.L;
@@ -68,6 +81,9 @@ public class RovPokeButton : MonoBehaviour
 
     // Латч-состояние для действий, у которых нет внешнего флага (action == None).
     private bool _latchedOn;
+
+    // Антидребезг: до этого момента времени новое срабатывание от касания игнорируется.
+    private float _следующееКасание_с;
 
     void Awake()
     {
@@ -105,15 +121,45 @@ public class RovPokeButton : MonoBehaviour
             return;
         }
         _interactable.selectEntered.AddListener(OnSelectEntered);
+        _interactable.hoverEntered.AddListener(OnHoverEntered);
     }
 
     void OnDisable()
     {
         if (_interactable != null)
+        {
             _interactable.selectEntered.RemoveListener(OnSelectEntered);
+            _interactable.hoverEntered.RemoveListener(OnHoverEntered);
+        }
     }
 
-    void OnSelectEntered(SelectEnterEventArgs args) => Press();
+    // Касание кончиком пальца: poke-интерактор ТОЛЬКО коснулся кнопки (hover), ещё не
+    // продавил на глубину. Жмём сразу — это убирает задержку «протолкни руку вперёд».
+    // Реагируем строго на poke-интерактор: луч/палец издалека (hover без касания) не жмёт.
+    void OnHoverEntered(HoverEnterEventArgs args)
+    {
+        if (!нажиматьПриКасании) return;
+        if (!(args.interactorObject is XRPokeInteractor)) return;
+        ПопробоватьНажать();
+    }
+
+    void OnSelectEntered(SelectEnterEventArgs args)
+    {
+        // Продавливание (poke-select) — ЗАПАСНОЙ путь на случай, если касание-hover на риге
+        // почему-то не сработало: кнопка всё равно нажмётся. Антидребезг не даёт продавливанию
+        // продублировать уже засчитанное касание. Захват/щипок/курок (при толькоPoke) не жмут.
+        if (толькоPoke && !(args.interactorObject is XRPokeInteractor)) return;
+        ПопробоватьНажать();
+    }
+
+    // Одно срабатывание не чаще, чем раз в антидребезг_с — палец на кромке кнопки
+    // иначе многократно входит/выходит из зоны касания и «дребезжит» защёлкой.
+    void ПопробоватьНажать()
+    {
+        if (Time.time < _следующееКасание_с) return;
+        _следующееКасание_с = Time.time + Mathf.Max(0f, антидребезг_с);
+        Press();
+    }
 
     void Update()
     {

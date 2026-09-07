@@ -55,6 +55,11 @@ public enum TelemetryChannel
     ДавлениеИстина,     // кПа, истинное гидростатическое давление ρgh — для сравнения с датчиком
     КурсИстина,         // град, истинный курс (движок)
     КурсГиро,           // град, курс по ОДНОМУ гироскопу без коррекции компасом (дрейфует)
+    ТангажИстина,       // град, истинный тангаж (движок) — для сравнения с акселерометром
+    КренИстина,         // град, истинный крен (движок)
+    СкоростьИстина,     // уз, истинная скорость (движок) — для сравнения с DVL
+    ВысотаНадДномИстина,// м, истинная высота над дном (движок) — для сравнения с эхолотом
+    ТокНагрузкиИстина,  // А, истинный ток (движок) — для сравнения с датчиком тока
 }
 
 [DisallowMultipleComponent]
@@ -163,6 +168,11 @@ public class TelemetryRecorder : MonoBehaviour
         Put(TelemetryChannel.ДавлениеИстина, RovSystems.hullPressureTrue_kPa);
         Put(TelemetryChannel.КурсИстина,     RovSystems.headingTrue_deg);
         Put(TelemetryChannel.КурсГиро,       RovSystems.headingGyro_deg);
+        Put(TelemetryChannel.ТангажИстина,   RovSystems.pitchTrue_deg);
+        Put(TelemetryChannel.КренИстина,     RovSystems.rollTrue_deg);
+        Put(TelemetryChannel.СкоростьИстина, RovSystems.speedTrue_mps * КоэфУзлы);   // м/с → узлы
+        Put(TelemetryChannel.ВысотаНадДномИстина, RovSystems.hasBottomEcho ? RovSystems.altitudeTrue_m : float.NaN);
+        Put(TelemetryChannel.ТокНагрузкиИстина,   RovSystems.currentDrawTrue_A);
 
         // Продвигаем кольцо ОДИН раз на весь сэмпл, после записи всех каналов.
         _head = (_head + 1) % _capacity;
@@ -195,7 +205,8 @@ public class TelemetryRecorder : MonoBehaviour
             case TelemetryChannel.ГлубинаИстина:
             case TelemetryChannel.УставкаГлубины:
             case TelemetryChannel.ОшибкаРегулирования:
-            case TelemetryChannel.ВысотаНадДном:          return "м";
+            case TelemetryChannel.ВысотаНадДном:
+            case TelemetryChannel.ВысотаНадДномИстина:    return "м";
             case TelemetryChannel.УправлениеВертикаль:
             case TelemetryChannel.ВкладП:
             case TelemetryChannel.ВкладИ:
@@ -204,12 +215,16 @@ public class TelemetryRecorder : MonoBehaviour
             case TelemetryChannel.КурсИстина:
             case TelemetryChannel.КурсГиро:
             case TelemetryChannel.Тангаж:
-            case TelemetryChannel.Крен:                   return "°";
+            case TelemetryChannel.ТангажИстина:
+            case TelemetryChannel.Крен:
+            case TelemetryChannel.КренИстина:             return "°";
             case TelemetryChannel.Скорость:
+            case TelemetryChannel.СкоростьИстина:
             case TelemetryChannel.СкоростьТечения:        return "уз";
             case TelemetryChannel.ЗарядАКБ:               return "%";
             case TelemetryChannel.НапряжениеШины:         return "В";
-            case TelemetryChannel.ТокНагрузки:            return "А";
+            case TelemetryChannel.ТокНагрузки:
+            case TelemetryChannel.ТокНагрузкиИстина:      return "А";
             case TelemetryChannel.МощностьДвижителей:     return "Вт";
             case TelemetryChannel.ТемператураДвижителей:  return "°C";
             case TelemetryChannel.ДавлениеНаКорпус:

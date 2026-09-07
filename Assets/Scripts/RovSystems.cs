@@ -23,7 +23,11 @@ public static class RovSystems
     public static float batteryCharge_Ah   = 16.0f;    // текущий заряд, А·ч
     public static float batteryVoltage_V   = 25.2f;    // напряжение шины под нагрузкой, В
     public static float batteryPercent     = 100.0f;   // SoC, %
-    public static float currentDraw_A      = 0.0f;     // полный ток нагрузки, А
+    // currentDraw_A — ПОКАЗАНИЕ датчика тока (шунт/Холл, с погрешностью). Его видят
+    // приборы. currentDrawTrue_A — истинный ток (движок), по нему разряжается АКБ:
+    // батарея тратит РЕАЛЬНЫЙ ток, а не измеренный. Показание формирует RovCurrentSensor.
+    public static float currentDraw_A      = 0.0f;     // полный ток нагрузки, А (показание)
+    public static float currentDrawTrue_A  = 0.0f;     // истинный ток нагрузки, А (движок)
     public static float auxBusVoltage_V    = 12.0f;    // вспомогательная шина (электроника), В
     public static float reservePercent     = 100.0f;   // резерв (статический «hardcoded» запас)
     public static SystemState powerState   = SystemState.OK;
@@ -56,7 +60,12 @@ public static class RovSystems
     public static SystemState leakState    = SystemState.OK;
 
     // ---------------- ЭХОЛОТ ----------------
-    public static float altitudeAboveBottom_m = 0.0f;
+    // altitudeAboveBottom_m — ПОКАЗАНИЕ эхолота (дальность из времени пробега звука,
+    // с погрешностью скорости звука и шумом). altitudeTrue_m — истинная высота над
+    // дном (геометрия движка, рейкаст). Показание формирует RovAltimeterSensor.
+    // hasBottomEcho — есть ли отражение от дна (в пределах дальности прибора).
+    public static float altitudeAboveBottom_m = 0.0f;  // показание, м
+    public static float altitudeTrue_m        = 0.0f;  // истина, м
     public static bool  hasBottomEcho         = false;
 
     // ---------------- НАВИГАЦИЯ ----------------
@@ -73,9 +82,19 @@ public static class RovSystems
     public static float heading_deg        = 0.0f;
     public static float headingTrue_deg    = 0.0f;
     public static float headingGyro_deg    = 0.0f;
-    public static float pitch_deg          = 0.0f;
-    public static float roll_deg           = 0.0f;
-    public static float speed_mps          = 0.0f;
+    // Тангаж/крен: pitch_deg/roll_deg — ПОКАЗАНИЕ датчика угла (акселерометр меряет
+    // вектор гравитации; при разгоне линейное ускорение подмешивается к наклону).
+    // pitchTrue_deg/rollTrue_deg — истина (движок). Показание формирует RovAttitudeSensor.
+    public static float pitch_deg          = 0.0f;   // показание, град
+    public static float roll_deg           = 0.0f;   // показание, град
+    public static float pitchTrue_deg      = 0.0f;   // истина, град
+    public static float rollTrue_deg       = 0.0f;   // истина, град
+    // Скорость: speed_mps — ПОКАЗАНИЕ доплеровского лага (DVL): работает только при
+    // захвате дна, шумит, теряет отсчёт вне дальности. speedTrue_mps — истинный модуль
+    // скорости (движок); её читает логика неподвижности миссии (нужна ПРАВДА, не прибор).
+    // Показание формирует RovSpeedSensor.
+    public static float speed_mps          = 0.0f;   // показание, м/с
+    public static float speedTrue_mps      = 0.0f;   // истина, м/с
     public static float currentSpeed_mps   = 0.0f;   // скорость течения в точке аппарата
 
     // ---------------- РЕЖИМ УПРАВЛЕНИЯ ----------------

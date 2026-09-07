@@ -3,6 +3,7 @@ using UnityEngine.Events;
 using UnityEngine.InputSystem;
 using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
+using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
 // Кнопка ОСМОТРА (сканирования) — отдельная от RovPokeButton, потому что действие
 // МОМЕНТНОЕ, а не защёлка: нажал → сканер засчитывает подсвеченную рядом трещину
@@ -49,6 +50,16 @@ public class RovScanButton : MonoBehaviour
     public Color highlightColor = new Color(0.3f, 0.7f, 1f);
     [Range(0f, 3f)] public float highlightIntensity = 1f;
 
+    [Header("Строгий VR-ввод (обычно НЕ нужно)")]
+    [Tooltip("ВЫКЛ (по умолчанию) — нажатие по любому select: руками palcem-poke, " +
+             "контроллером наведение+курок/grab. ВКЛ — только палец-poke.")]
+    public bool толькоPoke = false;
+    [Tooltip("ВКЛ (по умолчанию) — жать в момент касания кончиком пальца (без продавливания): касание = нажатие. " +
+             "ВЫКЛ — нужно чуть вдавить (poke-select).")]
+    public bool нажиматьПриКасании = true;
+    [Tooltip("Защита от дребезга при нажатии по касанию: минимум секунд между срабатываниями.")]
+    public float антидребезг_с = 0.3f;
+
     private XRBaseInteractable _interactable;
     private Vector3 _movingPartHome;
     private Material _indicatorMat;
@@ -56,6 +67,7 @@ public class RovScanButton : MonoBehaviour
     private bool _highlightHadEmission;
     private Color _highlightOrigEmission;
     private float _pressUntil;
+    private float _следующееКасание_с;   // антидребезг нажатия по касанию
 
     void Awake()
     {
@@ -86,15 +98,41 @@ public class RovScanButton : MonoBehaviour
             return;
         }
         _interactable.selectEntered.AddListener(OnSelectEntered);
+        _interactable.hoverEntered.AddListener(OnHoverEntered);
     }
 
     void OnDisable()
     {
         if (_interactable != null)
+        {
             _interactable.selectEntered.RemoveListener(OnSelectEntered);
+            _interactable.hoverEntered.RemoveListener(OnHoverEntered);
+        }
     }
 
-    void OnSelectEntered(SelectEnterEventArgs args) => Press();
+    // Касание кончиком пальца (poke коснулся, ещё не продавил) — жмём сразу, без задержки
+    // на глубину. Только poke-интерактор: луч/палец издалека не жмёт. См. RovPokeButton.
+    void OnHoverEntered(HoverEnterEventArgs args)
+    {
+        if (!нажиматьПриКасании) return;
+        if (!(args.interactorObject is XRPokeInteractor)) return;
+        ПопробоватьНажать();
+    }
+
+    void OnSelectEntered(SelectEnterEventArgs args)
+    {
+        // Продавливание — запасной путь, если касание-hover не сработало; антидребезг
+        // не даёт продублировать уже засчитанное касание. См. RovPokeButton.
+        if (толькоPoke && !(args.interactorObject is XRPokeInteractor)) return;
+        ПопробоватьНажать();
+    }
+
+    void ПопробоватьНажать()
+    {
+        if (Time.time < _следующееКасание_с) return;
+        _следующееКасание_с = Time.time + Mathf.Max(0f, антидребезг_с);
+        Press();
+    }
 
     void Update()
     {

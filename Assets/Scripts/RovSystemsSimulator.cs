@@ -185,9 +185,17 @@ public class RovSystemsSimulator : MonoBehaviour
         // фильтр). По умолчанию (без датчика в сцене) показание = истине.
         RovSystems.headingTrue_deg = e.y;
         RovSystems.heading_deg = e.y;
-        RovSystems.pitch_deg = NormalizeAngle(e.x);
-        RovSystems.roll_deg = NormalizeAngle(e.z);
-        RovSystems.speed_mps = _rb != null ? _rb.linearVelocity.magnitude : 0f;
+        // ИСТИННЫЕ тангаж/крен — движок знает точно. Показания pitch_deg/roll_deg
+        // формирует RovAttitudeSensor (акселерометр: гравитация + шум + ошибка от
+        // ускорения). По умолчанию (без датчика в сцене) показание = истине.
+        RovSystems.pitchTrue_deg = NormalizeAngle(e.x);
+        RovSystems.rollTrue_deg  = NormalizeAngle(e.z);
+        RovSystems.pitch_deg = RovSystems.pitchTrue_deg;
+        RovSystems.roll_deg  = RovSystems.rollTrue_deg;
+        // ИСТИННАЯ скорость — модуль вектора скорости из физики. Показание speed_mps
+        // формирует RovSpeedSensor (доплеровский лаг). По умолчанию показание = истине.
+        RovSystems.speedTrue_mps = _rb != null ? _rb.linearVelocity.magnitude : 0f;
+        RovSystems.speed_mps = RovSystems.speedTrue_mps;
 
         // 2. Ток нагрузки движителей.
         // Считаем по ГРУППАМ движителей, а не по «средней команде»: ход вперёд и
@@ -217,6 +225,11 @@ public class RovSystemsSimulator : MonoBehaviour
         float I_aux = (P_auxOut / АуксКПД) / U_mainPrev;
 
         float I_total = ТокОжидания + I_thrusters + I_lights + I_aux;
+        // ИСТИННЫЙ ток — по нему разряжается АКБ (батарея тратит реальный ток, а не
+        // измеренный). Показание currentDraw_A формирует RovCurrentSensor (шунт/Холл
+        // с погрешностью). По умолчанию (без датчика) показание = истине. Ниже разряд
+        // и просадка напряжения считаются от локального I_total — то есть от ИСТИНЫ.
+        RovSystems.currentDrawTrue_A = I_total;
         RovSystems.currentDraw_A = I_total;
 
         // 3. Разряд АКБ (закон Фарадея)
@@ -328,15 +341,19 @@ public class RovSystemsSimulator : MonoBehaviour
         SystemState manipPhys = RovSystems.grabberClosed ? SystemState.OK : SystemState.Off;
         RovSystems.manipulatorState = RovSystems.ApplyDamage(manipPhys, RovSystems.manipulatorDamage);
 
-        // 9. Эхолот
+        // 9. Эхолот. ИСТИННАЯ высота над дном — геометрия (рейкаст вниз). Показание
+        // altitudeAboveBottom_m формирует RovAltimeterSensor (дальность из времени
+        // пробега звука: ошибка скорости звука + шум). По умолчанию показание = истине.
         RaycastHit hit;
         if (Physics.Raycast(pos, Vector3.down, out hit, ДальностьЭхолота))
         {
+            RovSystems.altitudeTrue_m = hit.distance;
             RovSystems.altitudeAboveBottom_m = hit.distance;
             RovSystems.hasBottomEcho = true;
         }
         else
         {
+            RovSystems.altitudeTrue_m = ДальностьЭхолота;
             RovSystems.altitudeAboveBottom_m = ДальностьЭхолота;
             RovSystems.hasBottomEcho = false;
         }

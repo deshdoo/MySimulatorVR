@@ -21,3 +21,7 @@ Packages/com.unity.ai.assistant/RelayApp~/
 # Scratch / temp files
 _tmp_*
 make_pdf.py
+
+# Backups & Unity auto-recovery
+*.bak_*
+Assets/_Recovery/
