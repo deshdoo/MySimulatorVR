@@ -60,6 +60,7 @@ public enum TelemetryChannel
     СкоростьИстина,     // уз, истинная скорость (движок) — для сравнения с DVL
     ВысотаНадДномИстина,// м, истинная высота над дном (движок) — для сравнения с эхолотом
     ТокНагрузкиИстина,  // А, истинный ток (движок) — для сравнения с датчиком тока
+    ГлубинаРегулятора,  // м, глубина на входе ПИД (отфильтрованное показание датчика; NaN когда автопилот выключен)
 }
 
 [DisallowMultipleComponent]
@@ -95,6 +96,17 @@ public class TelemetryRecorder : MonoBehaviour
     void Awake()
     {
         Instance = this;
+        Инициализировать();
+        Debug.Log($"[TelemetryRecorder] Запущен на «{name}»: {1f / sampleInterval_s:F0} Гц, окно {historyLength_s:F0} с, {_capacity} сэмплов.", this);
+    }
+
+    // Отдельно от Awake: после перекомпиляции скриптов прямо в Play Mode Unity
+    // восстанавливает только сериализуемые поля — массив массивов (_buffers) и
+    // статический Instance теряются, Awake повторно НЕ вызывается, и каждый кадр
+    // падал NullReferenceException. Теперь Update сам пересоздаёт буферы.
+    void Инициализировать()
+    {
+        Instance = this;
         _capacity = Mathf.Max(2, Mathf.CeilToInt(historyLength_s / Mathf.Max(0.001f, sampleInterval_s)));
 
         int channels = System.Enum.GetValues(typeof(TelemetryChannel)).Length;
@@ -104,14 +116,14 @@ public class TelemetryRecorder : MonoBehaviour
         _head = 0;
         _count = 0;
         _nextSampleTime = 0f;
-
-        Debug.Log($"[TelemetryRecorder] Запущен на «{name}»: {1f / sampleInterval_s:F0} Гц, окно {historyLength_s:F0} с, {_capacity} сэмплов.", this);
     }
 
     void OnDestroy() { if (Instance == this) Instance = null; }
 
     void Update()
     {
+        if (_buffers == null) Инициализировать();
+
         // Пока симулятор не посчитал первый кадр, в RovSystems лежат нули по
         // умолчанию. Записывать их нельзя: на графике это неотличимо от реального
         // провала величины в 0 — именно так линия глубины начиналась «от нуля».
@@ -145,6 +157,7 @@ public class TelemetryRecorder : MonoBehaviour
         Put(TelemetryChannel.ВкладП, hold ? ap.ВкладП : float.NaN);
         Put(TelemetryChannel.ВкладИ, hold ? ap.ВкладИ : float.NaN);
         Put(TelemetryChannel.ВкладД, hold ? ap.ВкладД : float.NaN);
+        Put(TelemetryChannel.ГлубинаРегулятора, hold ? ap.ГлубинаРегулятора_m : float.NaN);
 
         Put(TelemetryChannel.Курс,          RovSystems.heading_deg);
         Put(TelemetryChannel.Тангаж,        RovSystems.pitch_deg);
@@ -203,6 +216,7 @@ public class TelemetryRecorder : MonoBehaviour
         {
             case TelemetryChannel.Глубина:
             case TelemetryChannel.ГлубинаИстина:
+            case TelemetryChannel.ГлубинаРегулятора:
             case TelemetryChannel.УставкаГлубины:
             case TelemetryChannel.ОшибкаРегулирования:
             case TelemetryChannel.ВысотаНадДном:

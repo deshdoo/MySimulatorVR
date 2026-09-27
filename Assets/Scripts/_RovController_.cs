@@ -156,8 +156,25 @@ public class RovController : MonoBehaviour
         }
     }
 
+    // Взвесь в воде (UnderwaterParticles в сцене) переносится тем же полем течения —
+    // так течение видно глазом. Компонент добавляется сам, настраивать ничего не надо.
+    void Start()
+    {
+        if (Течение != null && Течение.ПереноситьВзвесь && GetComponent<CurrentParticleAdvector>() == null)
+            gameObject.AddComponent<CurrentParticleAdvector>();
+        // Линии тока и профиль течения по слоям — по клавише F9.
+        // Доплеровский лаг: F3 — анимация на данных рабочего датчика, F6 — вид, F7/F8 — пауза/скорость.
+        if (GetComponent<DopplerInstrumentsVisualizer>() == null)
+            gameObject.AddComponent<DopplerInstrumentsVisualizer>();
+        if (GetComponent<CurrentFieldVisualizer>() == null)
+            gameObject.AddComponent<CurrentFieldVisualizer>();
+    }
+
     void FixedUpdate()
     {
+        // Вихри живут в области вокруг аппарата и плывут со средним потоком.
+        if (Течение != null) Течение.ОбновитьВихри(transform.position, Time.fixedDeltaTime);
+
         // Повреждённые движители теряют тягу: удар по движителям (thrusterDamage)
         // теперь не только зажигает индикатор, но и реально режет усилие —
         // аппарат становится вялым, как с частично отказавшей движительной установкой.

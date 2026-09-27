@@ -177,6 +177,7 @@ public class RovSystemsSimulator : MonoBehaviour
         // формирует уже RovDepthSensor (давление → погрешности → обратный расчёт).
         // Здесь ставим depth_m = истине как безопасное значение по умолчанию: если
         // компонента-датчика в сцене нет, всё работает ровно как раньше.
+        RovSystems.уровеньПоверхности_Y = УровеньПоверхностиВоды;
         RovSystems.depthTrue_m = Mathf.Max(0f, УровеньПоверхностиВоды - pos.y);
         RovSystems.depth_m = RovSystems.depthTrue_m;
         Vector3 e = transform.eulerAngles;
@@ -344,11 +345,13 @@ public class RovSystemsSimulator : MonoBehaviour
         // 9. Эхолот. ИСТИННАЯ высота над дном — геометрия (рейкаст вниз). Показание
         // altitudeAboveBottom_m формирует RovAltimeterSensor (дальность из времени
         // пробега звука: ошибка скорости звука + шум). По умолчанию показание = истине.
-        RaycastHit hit;
-        if (Physics.Raycast(pos, Vector3.down, out hit, ДальностьЭхолота))
+        // Луч фильтруется (DvlJanus.ЛучДоДна): раньше голый Physics.Raycast упирался в
+        // СОБСТВЕННЫЙ КАБЕЛЬ под аппаратом — высота выходила ~полметра, а придонный слой
+        // течения (WaterCurrent) гасил поток ниже аппарата до нуля.
+        if (DvlJanus.ЛучДоДна(transform, _rb, pos, Vector3.down, ДальностьЭхолота, out float доДна))
         {
-            RovSystems.altitudeTrue_m = hit.distance;
-            RovSystems.altitudeAboveBottom_m = hit.distance;
+            RovSystems.altitudeTrue_m = доДна;
+            RovSystems.altitudeAboveBottom_m = доДна;
             RovSystems.hasBottomEcho = true;
         }
         else
