@@ -67,9 +67,9 @@ public class CameraDamageEffect : MonoBehaviour
 
     void Update()
     {
-        // === ОТЛАДКА: клавиша F8 — циклически меняет уровень повреждения камеры ===
+        // === ОТЛАДКА: клавиша F11 (была F8, конфликтовала со скоростью анимации DVL) — циклически меняет уровень повреждения камеры ===
         // (была K, но K занята под Grab руки в XR-эмуляторе — иначе хват давал «шум на экране»)
-        if (Keyboard.current != null && Keyboard.current[Key.F8].wasPressedThisFrame)
+        if (Keyboard.current != null && Keyboard.current[KeyBindings.K(Key.F11)].wasPressedThisFrame)
         {
             RovSystems.cameraDamage = (RovSystems.cameraDamage + 1) % 3;
             Debug.Log($"[CameraDamage] Тест: уровень={RovSystems.cameraDamage}");

@@ -243,6 +243,15 @@ public class RovAutopilot : MonoBehaviour
                   $"крен={NormalizeAngle(transform.eulerAngles.z):F1}°), курс оставляю={transform.eulerAngles.y:F1}°, держим глубину={_targetDepth_m:F2} м ({источникГлубины})");
     }
 
+    // Продолжение сохранённой миссии: включить удержание на СОХРАНЁННОЙ глубине,
+    // а не на текущем показании (фильтр глубины после загрузки ещё не установился).
+    public void ВосстановитьУдержание(float глубина_м)
+    {
+        Engage();
+        _targetDepth_m = глубина_м;
+        RovSystems.depthHoldTarget_m = глубина_м;
+    }
+
     public void Disengage()
     {
         Engaged = false;

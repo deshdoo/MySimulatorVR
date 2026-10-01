@@ -48,6 +48,11 @@ Shader "Custom/DepthFog"
             float _SpotlightRangeB;
             float _SpotlightCosAngleB;
 
+            // Муть, поднятая движителями со дна (RovSiltStirring, глобальные).
+            // _SiltTurbidity 0..1 — насколько вода вокруг камеры забита илом.
+            float _SiltTurbidity;
+            float3 _SiltColor;
+
             float4 Frag(Varyings input) : SV_Target
             {
                 float2 uv = input.texcoord;
@@ -122,6 +127,18 @@ Shader "Custom/DepthFog"
                 // Свечение рассеянного света внутри конуса — сильнее ближе к
                 // прожектору и к оси луча, ослабевает к краю/дальнему концу.
                 col.rgb += clearAmount * _SpotlightScatterColor * _SpotlightScatterIntensity;
+
+                // Муть со дна: та же экспонента Бугера—Ламберта, но с коэффициентом
+                // ослабления в десятки раз больше, чем у чистой воды, — в облаке ила
+                // видимость падает до десятков сантиметров. Прожектор в мути не
+                // пробивает, а подсвечивает взвесь (обратное рассеяние) — картинка
+                // становится светлой и плоской, как на реальных ROV-камерах.
+                if (_SiltTurbidity > 0.001)
+                {
+                    float siltFog = saturate(1.0 - exp(-eyeDepth * _SiltTurbidity * 2.5));
+                    float3 siltLit = _SiltColor * (0.55 + clearAmount * 0.9);
+                    col.rgb = lerp(col.rgb, siltLit, siltFog * saturate(_SiltTurbidity * 1.2));
+                }
 
                 return col;
             }

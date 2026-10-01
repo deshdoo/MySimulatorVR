@@ -142,14 +142,14 @@ public class RovController : MonoBehaviour
         if (Keyboard.current == null) return;
 
         if (клавишаТечение != Key.None && Течение != null &&
-            Keyboard.current[клавишаТечение].wasPressedThisFrame)
+            Keyboard.current[KeyBindings.K(клавишаТечение)].wasPressedThisFrame)
         {
             Течение.включено = !Течение.включено;
             Debug.Log($"[Течение] снос от течения {(Течение.включено ? "ВКЛ" : "ВЫКЛ")}");
         }
 
         if (клавишаЗаморозки != Key.None &&
-            Keyboard.current[клавишаЗаморозки].wasPressedThisFrame)
+            Keyboard.current[KeyBindings.K(клавишаЗаморозки)].wasPressedThisFrame)
         {
             _заморозкаСноса = !_заморозкаСноса;
             Debug.Log($"[Снос] заморозка сноса {(_заморозкаСноса ? "ВКЛ — аппарат не несёт, рычаги точнее" : "ВЫКЛ")}");
@@ -168,6 +168,12 @@ public class RovController : MonoBehaviour
             gameObject.AddComponent<DopplerInstrumentsVisualizer>();
         if (GetComponent<CurrentFieldVisualizer>() == null)
             gameObject.AddComponent<CurrentFieldVisualizer>();
+        // Муть со дна от струи движителей при работе ниже ~1 м над грунтом.
+        if (GetComponent<RovSiltStirring>() == null)
+            gameObject.AddComponent<RovSiltStirring>();
+        // Звук борта: фон, гул движителей, удары, сигнал фиксации дефекта.
+        if (GetComponent<RovAudio>() == null)
+            gameObject.AddComponent<RovAudio>();
     }
 
     void FixedUpdate()
@@ -277,6 +283,15 @@ public class RovController : MonoBehaviour
         float Fy = -0.5f * ПлотностьВоды * CxВерх * ПлощадьВерх * vLocal.y * Mathf.Abs(vLocal.y);
         float Fz = -0.5f * ПлотностьВоды * CxНос  * ПлощадьНос  * vLocal.z * Mathf.Abs(vLocal.z);
 
+        // Сила считается по скорости начала шага (явная схема). У лёгкого аппарата на
+        // большой скорости она могла бы за один шаг не просто остановить, а развернуть
+        // движение — пошла бы раскачка. Сопротивление физически не может сделать больше,
+        // чем погасить относительную скорость, поэтому ограничиваем его этим пределом.
+        float предел = _rb.mass / Time.fixedDeltaTime;
+        Fx = ОграничитьГашение(Fx, предел * Mathf.Abs(vLocal.x));
+        Fy = ОграничитьГашение(Fy, предел * Mathf.Abs(vLocal.y));
+        Fz = ОграничитьГашение(Fz, предел * Mathf.Abs(vLocal.z));
+
         _rb.AddRelativeForce(new Vector3(Fx, Fy, Fz), ForceMode.Force);
     }
 
@@ -290,7 +305,26 @@ public class RovController : MonoBehaviour
             -КоэффСопротивленияВращению * wLocal.z * Mathf.Abs(wLocal.z)
         );
 
+        // То же ограничение, что у поступательного сопротивления: момент не больше, чем
+        // нужно, чтобы погасить вращение за шаг (I·|ω|/Δt). Иначе при малой массе
+        // (меньше момент инерции) аппарат начинал бы дрожать по курсу и крену.
+        float dt = Time.fixedDeltaTime;
+        dragTorque.x = ОграничитьГашение(dragTorque.x, МоментИнерции(Vector3.right)   * Mathf.Abs(wLocal.x) / dt);
+        dragTorque.y = ОграничитьГашение(dragTorque.y, МоментИнерции(Vector3.up)      * Mathf.Abs(wLocal.y) / dt);
+        dragTorque.z = ОграничитьГашение(dragTorque.z, МоментИнерции(Vector3.forward) * Mathf.Abs(wLocal.z) / dt);
+
         _rb.AddRelativeTorque(dragTorque, ForceMode.Force);
+    }
+
+    static float ОграничитьГашение(float сила, float предел) => Mathf.Clamp(сила, -предел, предел);
+
+    // Момент инерции корпуса относительно оси в связанных осях, кг·м²
+    // (тензор Unity задан в главных осях, повёрнутых на inertiaTensorRotation).
+    float МоментИнерции(Vector3 осьЛокально)
+    {
+        Vector3 e = Quaternion.Inverse(_rb.inertiaTensorRotation) * осьЛокально;
+        Vector3 I = _rb.inertiaTensor;
+        return I.x * e.x * e.x + I.y * e.y * e.y + I.z * e.z * e.z;
     }
 
     // Метацентрический восстанавливающий момент: момент пропорционален

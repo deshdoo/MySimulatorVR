@@ -81,7 +81,7 @@ public class TelemetryGraphSwitcher : MonoBehaviour
 
     void Update()
     {
-        if (клавишаВперёд != Key.None && Keyboard.current != null && Keyboard.current[клавишаВперёд].wasPressedThisFrame)
+        if (клавишаВперёд != Key.None && Keyboard.current != null && Keyboard.current[KeyBindings.K(клавишаВперёд)].wasPressedThisFrame)
             Следующая();
     }
 

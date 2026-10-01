@@ -84,6 +84,21 @@ public class MissionBootstrap : MonoBehaviour
         ЗаполнитьЦели(менеджер);
         НастроитьСканер();
         НастроитьВентиль();
+        НастроитьРазбор();
+    }
+
+    // Сбор показателей + VR-окно разбора по завершении миссии.
+    void НастроитьРазбор()
+    {
+        var stats = ПервыйВСцене<MissionStats>();
+        if (stats == null) stats = gameObject.AddComponent<MissionStats>();
+        if (stats.НПА == null) stats.НПА = НПА != null ? НПА : ТрансформКомпонента<RovController>();
+
+        if (ПервыйВСцене<MissionDebriefPanel>() == null) gameObject.AddComponent<MissionDebriefPanel>();
+
+        // Траектория для 3D-повтора в меню «Результаты».
+        if (stats.НПА != null && stats.НПА.GetComponent<MissionReplayRecorder>() == null)
+            stats.НПА.gameObject.AddComponent<MissionReplayRecorder>();
     }
 
     MissionManager НайтиИлиСоздатьМенеджер()

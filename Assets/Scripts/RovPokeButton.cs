@@ -164,7 +164,7 @@ public class RovPokeButton : MonoBehaviour
     void Update()
     {
         // Тест с клавиатуры
-        if (testKey != Key.None && Keyboard.current != null && Keyboard.current[testKey].wasPressedThisFrame)
+        if (testKey != Key.None && Keyboard.current != null && Keyboard.current[KeyBindings.K(testKey)].wasPressedThisFrame)
             Press();
 
         bool on = IsOn();

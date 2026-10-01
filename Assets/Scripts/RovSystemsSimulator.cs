@@ -121,6 +121,13 @@ public class RovSystemsSimulator : MonoBehaviour
     private Rigidbody _rb;
     private float _reserveCharge_Ah;
 
+    // Заряд резервной АКБ, А·ч — для сохранения/продолжения миссии.
+    public float ЗарядРезерва_Ач
+    {
+        get => _reserveCharge_Ah;
+        set { _reserveCharge_Ah = Mathf.Clamp(value, 0f, ЁмкостьРезерв); RovSystems.reservePercent = _reserveCharge_Ah / ЁмкостьРезерв * 100f; }
+    }
+
     void Awake()
     {
         _rb = GetComponent<Rigidbody>();

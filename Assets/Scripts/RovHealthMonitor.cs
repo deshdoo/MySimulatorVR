@@ -34,6 +34,10 @@ public class RovHealthMonitor : MonoBehaviour
 
     private Rigidbody _rb;
 
+    // Каждый удар выше ПорогЛёгкогоУрона: энергия, Дж, и с чем столкнулись.
+    // Слушает MissionStats — для разбора миссии (число и сила ударов).
+    public static event System.Action<float, string> ПриУдаре;
+
     void Awake() { _rb = GetComponent<Rigidbody>(); }
 
     void OnCollisionEnter(Collision collision)
@@ -47,6 +51,7 @@ public class RovHealthMonitor : MonoBehaviour
             Debug.Log($"[Удар] v={v_rel.magnitude:F2} м/с, m={_rb.mass:F1} кг, E={E:F2} Дж, объект: {collision.gameObject.name}");
 
         if (E < ПорогЛёгкогоУрона) return;
+        ПриУдаре?.Invoke(E, collision.gameObject.name);
 
         if (E < ПорогСреднегоУрона)
         {

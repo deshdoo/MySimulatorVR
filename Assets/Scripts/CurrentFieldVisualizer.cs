@@ -74,7 +74,7 @@ public class CurrentFieldVisualizer : MonoBehaviour
 
     void Update()
     {
-        if (клавиша != Key.None && Keyboard.current != null && Keyboard.current[клавиша].wasPressedThisFrame)
+        if (клавиша != Key.None && Keyboard.current != null && Keyboard.current[KeyBindings.K(клавиша)].wasPressedThisFrame)
         {
             Показывать = !Показывать;
             var поле = _rov != null ? _rov.Течение : null;

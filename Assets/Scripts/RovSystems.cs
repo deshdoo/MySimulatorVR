@@ -96,6 +96,9 @@ public static class RovSystems
     public static float speed_mps          = 0.0f;   // показание, м/с
     public static float speedTrue_mps      = 0.0f;   // истина, м/с
     public static float currentSpeed_mps   = 0.0f;   // скорость течения в точке аппарата
+    // Мутность воды у бортовой камеры, 0..1 (муть, поднятая движителями со дна).
+    // Формирует RovSiltStirring; читают сканер осмотра и разбор миссии.
+    public static float turbidity          = 0.0f;
 
     // ---------------- РЕЖИМ УПРАВЛЕНИЯ ----------------
     public static bool  depthHoldActive    = false;

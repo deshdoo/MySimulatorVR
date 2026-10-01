@@ -186,6 +186,57 @@ public class PipelineDefectSpawner : MonoBehaviour
         return true;
     }
 
+    // Продолжение сохранённой миссии: убрать случайно расставленные дефекты и
+    // поставить сохранённые (те же места, ориентация и тип).
+    public void УдалитьВсеДефекты()
+    {
+        foreach (var d in FindObjectsByType<PipelineDefect>(FindObjectsSortMode.None))
+            if (d != null) DestroyImmediate(d.gameObject);
+    }
+
+    public PipelineDefect Разместить(PipelineDefect.ТипДефекта тип, Vector3 место, Quaternion пов)
+    {
+        GameObject префаб = null;
+        if (ПрефабыДефектов != null)
+            foreach (var p in ПрефабыДефектов)
+            {
+                if (p == null) continue;
+                if (префаб == null) префаб = p;
+                var pd = p.GetComponentInChildren<PipelineDefect>(true);
+                if (pd != null && pd.Тип == тип) { префаб = p; break; }
+            }
+        if (префаб == null) return null;
+        var экземпляр = Instantiate(префаб, место, пов);
+        if (_слойТрубы >= 0) УстановитьСлойРекурсивно(экземпляр, _слойТрубы);
+        if (ПузыриУтечки && экземпляр.GetComponentInChildren<PipelineLeakEmitter>() == null)
+            экземпляр.AddComponent<PipelineLeakEmitter>();
+        var d = экземпляр.GetComponentInChildren<PipelineDefect>();
+        if (d != null) d.Тип = тип;
+        return d;
+    }
+
+    // Ось трубы как отрезок (для разбора миссии: KP дефектов, покрытие осмотром).
+    // По точкам трассы — первая/последняя точка; по коллайдерам — длинная
+    // горизонтальная ось габаритов. Для прямой трубы этого достаточно.
+    public bool ГеометрияТрубы(out Vector3 начало, out Vector3 конец, out float радиус)
+    {
+        начало = конец = Vector3.zero; радиус = 0f;
+        if (_путь != null && _путь.Length >= 2)
+        {
+            начало = _путь[0]; конец = _путь[_путь.Length - 1]; радиус = _радиус;
+            return true;
+        }
+        if (_коллайдеры == null) return false;
+        Vector3 s = _габариты.size;
+        bool поX = s.x >= s.z;
+        Vector3 ось = поX ? Vector3.right : Vector3.forward;
+        float пол = (поX ? s.x : s.z) * 0.5f;
+        начало = _габариты.center - ось * пол;
+        конец  = _габариты.center + ось * пол;
+        радиус = РадиусТрубы > 0f ? РадиусТрубы : Mathf.Min(s.y, поX ? s.z : s.x) * 0.5f;
+        return true;
+    }
+
     bool СлучайнаяТочка(System.Random rng, out Vector3 поз, out Vector3 наружу, out int слой)
     {
         if (_коллайдеры != null) return ТочкаНаКоллайдере(rng, out поз, out наружу, out слой);

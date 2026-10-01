@@ -122,10 +122,10 @@ public class DopplerInstrumentsVisualizer : MonoBehaviour
         var kb = Keyboard.current;
         if (kb != null)
         {
-            if (клавишаDVL != Key.None && kb[клавишаDVL].wasPressedThisFrame) Переключить();
-            if (клавишаВида != Key.None && kb[клавишаВида].wasPressedThisFrame && Показывать) ВидСбоку(!_видСбоку);
-            if (клавишаПаузы != Key.None && kb[клавишаПаузы].wasPressedThisFrame) _пауза = !_пауза;
-            if (клавишаСкорости != Key.None && kb[клавишаСкорости].wasPressedThisFrame)
+            if (клавишаDVL != Key.None && kb[KeyBindings.K(клавишаDVL)].wasPressedThisFrame) Переключить();
+            if (клавишаВида != Key.None && kb[KeyBindings.K(клавишаВида)].wasPressedThisFrame && Показывать) ВидСбоку(!_видСбоку);
+            if (клавишаПаузы != Key.None && kb[KeyBindings.K(клавишаПаузы)].wasPressedThisFrame) _пауза = !_пауза;
+            if (клавишаСкорости != Key.None && kb[KeyBindings.K(клавишаСкорости)].wasPressedThisFrame)
                 _множитель = _множитель > 0.9f ? 0.5f : _множитель > 0.4f ? 0.25f : 1f;
         }
         if (!Показывать) return;

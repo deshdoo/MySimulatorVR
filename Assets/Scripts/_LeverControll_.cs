@@ -182,8 +182,8 @@ public class LeverController : MonoBehaviour
             {
                 if (Keyboard.current != null)
                 {
-                    if (Keyboard.current[keyPositive].isPressed) input += 1f;
-                    if (Keyboard.current[keyNegative].isPressed) input -= 1f;
+                    if (Keyboard.current[KeyBindings.K(keyPositive)].isPressed) input += 1f;
+                    if (Keyboard.current[KeyBindings.K(keyNegative)].isPressed) input -= 1f;
                 }
                 if (_hoveredLeft)  input += _leftStick.ReadValue<Vector2>().y;
                 if (_hoveredRight) input += _rightStick.ReadValue<Vector2>().y;

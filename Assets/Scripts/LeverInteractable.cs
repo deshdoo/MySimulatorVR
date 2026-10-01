@@ -195,8 +195,8 @@ public class LeverInteractable : MonoBehaviour
         {
             // Тест в редакторе: клавиши работают только пока рычаг наведён
             float input = 0f;
-            if (Keyboard.current[keyPositive].isPressed) input += 1f;
-            if (Keyboard.current[keyNegative].isPressed) input -= 1f;
+            if (Keyboard.current[KeyBindings.K(keyPositive)].isPressed) input += 1f;
+            if (Keyboard.current[KeyBindings.K(keyNegative)].isPressed) input -= 1f;
             float dirSign = invert ? -1f : 1f;
             _angle += input * 60f * Time.deltaTime * dirSign;
             _angle = Mathf.Clamp(_angle, minAngle, maxAngle);
@@ -263,10 +263,10 @@ public class LeverInteractable : MonoBehaviour
             float inF = 0f, inR = 0f;
             if (hovered && Keyboard.current != null)
             {
-                if (Keyboard.current[keyPositive].isPressed) inF += 1f;
-                if (Keyboard.current[keyNegative].isPressed) inF -= 1f;
-                if (Keyboard.current[keyRight].isPressed)    inR += 1f;
-                if (Keyboard.current[keyLeft].isPressed)     inR -= 1f;
+                if (Keyboard.current[KeyBindings.K(keyPositive)].isPressed) inF += 1f;
+                if (Keyboard.current[KeyBindings.K(keyNegative)].isPressed) inF -= 1f;
+                if (Keyboard.current[KeyBindings.K(keyRight)].isPressed)    inR += 1f;
+                if (Keyboard.current[KeyBindings.K(keyLeft)].isPressed)     inR -= 1f;
                 if (крестоваяТраектория && (inF != 0f || inR != 0f))
                 {
                     if (Mathf.Abs(inF) >= Mathf.Abs(inR)) inR = 0f; else inF = 0f;

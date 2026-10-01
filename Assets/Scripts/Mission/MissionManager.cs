@@ -44,7 +44,6 @@ public class MissionManager : MonoBehaviour
 
     public bool Завершена { get; private set; }
     public float ВремяМиссии_с { get; private set; }
-    private float _старт;
 
     void Awake()
     {
@@ -59,21 +58,22 @@ public class MissionManager : MonoBehaviour
 
     void Start()
     {
-        _старт = Time.time;
         АктивироватьСледующую();   // первая цель становится активной
         Изменилось?.Invoke();
     }
 
     void Update()
     {
-        if (!Завершена) ВремяМиссии_с = Time.time - _старт;
+        // Накопление по кадрам, а не Time.time − старт: пока окно разбора держит
+        // компонент выключенным (пауза), время миссии не идёт.
+        if (!Завершена) ВремяМиссии_с += Time.deltaTime;
 
         if (клавишаЗавершитьЦель != Key.None && Keyboard.current != null &&
-            Keyboard.current[клавишаЗавершитьЦель].wasPressedThisFrame)
+            Keyboard.current[KeyBindings.K(клавишаЗавершитьЦель)].wasPressedThisFrame)
             ЗавершитьТекущую();
 
         if (клавишаПропуститьОсмотр != Key.None && Keyboard.current != null &&
-            Keyboard.current[клавишаПропуститьОсмотр].wasPressedThisFrame)
+            Keyboard.current[KeyBindings.K(клавишаПропуститьОсмотр)].wasPressedThisFrame)
             ПропуститьОсмотр();
     }
 
@@ -117,6 +117,40 @@ public class MissionManager : MonoBehaviour
             Завершена = true;
             МиссияЗавершена?.Invoke();
         }
+    }
+
+    // Оператор завершил миссию сам (кнопка в окне промежуточных итогов): всё
+    // невыполненное помечается проваленным, миссия закрывается — и дальше идёт
+    // обычный путь МиссияЗавершена (итоговый разбор).
+    public bool Досрочно { get; private set; }
+
+    public void ЗавершитьДосрочно()
+    {
+        if (Завершена) return;
+        foreach (var ц in Цели)
+            if (ц.Состояние == MissionObjectiveState.Pending || ц.Состояние == MissionObjectiveState.Active)
+                ц.Состояние = MissionObjectiveState.Failed;
+        Досрочно = true;
+        Завершена = true;
+        Изменилось?.Invoke();
+        МиссияЗавершена?.Invoke();
+    }
+
+    // Продолжение сохранённой миссии: время и выполненные этапы. Невыполненные
+    // (в т.ч. «проваленные» досрочным завершением) снова ждут своей очереди.
+    // времяЗавершения[i] — когда этап был закрыт (время миссии), < 0 — не закрыт.
+    public void Восстановить(float время, IList<float> времяЗавершения)
+    {
+        Завершена = false; Досрочно = false;
+        for (int i = 0; i < Цели.Count; i++)
+        {
+            float tz = времяЗавершения != null && i < времяЗавершения.Count ? времяЗавершения[i] : -1f;
+            Цели[i].Состояние = tz >= 0f ? MissionObjectiveState.Completed : MissionObjectiveState.Pending;
+            Цели[i].ВремяЗавершения_с = tz;
+        }
+        ВремяМиссии_с = время;
+        АктивироватьСледующую();
+        Изменилось?.Invoke();
     }
 
     // Пометить цель проваленной (для будущих сценариев с провалом задачи).
