@@ -115,7 +115,8 @@ public class RovController : MonoBehaviour
 
     private Rigidbody _rb;
     private int _contactCount = 0; // сколько коллайдеров касается корпуса прямо сейчас
-    private Vector3 _prevVLocal;   // скорость в связанных осях на прошлом шаге — для присоединённой массы
+    private Vector3 _prevVLocal;   // скорость в связанных осях на прошлом шаге (история для сброса после переноса)
+    private Vector3 _силыЛок;      // сумма известных сил этого шага в связанных осях — для присоединённой массы
     private bool _заморозкаСноса;  // тест-режим: гасим любой горизонтальный снос
 
     void Awake()
@@ -127,6 +128,7 @@ public class RovController : MonoBehaviour
         // Интерполяция сглаживает позу между шагами физики — камера на аппарате перестаёт
         // «дрожать», особенно после ударов о дно/трубу (кадр рендера ≠ шаг FixedUpdate).
         _rb.interpolation = RigidbodyInterpolation.Interpolate;
+        ВыровнятьИнерцию();
     }
 
     // Восстанавливающий момент тянет корпус к строго горизонтальному положению,
@@ -134,6 +136,17 @@ public class RovController : MonoBehaviour
     // этот момент бесконечно "спорит" с реальным контактным наклоном —
     // отсюда незатухающая качка. Поэтому момент включается только когда
     // корпус ничего не касается (свободно плавает).
+    // Для испытательных манёвров (RovManeuverTests): касается ли корпус чего-нибудь,
+    // режим заморозки сноса и сброс истории скорости после переноса аппарата —
+    // иначе присоединённая масса увидела бы «ускорение» скачка и дёрнула корпус.
+    public bool Касается => _contactCount > 0;
+    public bool ЗаморозкаСноса { get => _заморозкаСноса; set => _заморозкаСноса = value; }
+    public void СброситьИсториюСкорости()
+    {
+        _prevVLocal = transform.InverseTransformDirection(_rb.linearVelocity);
+        _contactCount = 0;
+    }
+
     void OnCollisionEnter(Collision c) { _contactCount++; }
     void OnCollisionExit(Collision c)  { _contactCount = Mathf.Max(0, _contactCount - 1); }
 
@@ -174,6 +187,9 @@ public class RovController : MonoBehaviour
         // Звук борта: фон, гул движителей, удары, сигнал фиксации дефекта.
         if (GetComponent<RovAudio>() == null)
             gameObject.AddComponent<RovAudio>();
+        // Вся телеметрия миссии — в CSV (Excel/Python, графики для ВКР).
+        if (GetComponent<TelemetryCsvLogger>() == null)
+            gameObject.AddComponent<TelemetryCsvLogger>();
     }
 
     void FixedUpdate()
@@ -188,22 +204,23 @@ public class RovController : MonoBehaviour
                          : RovSystems.thrusterDamage == 1 ? ТягаПриЛёгкомУроне
                          : 1f;
 
-        _rb.AddRelativeForce(new Vector3(
+        _силыЛок = new Vector3(
             DroneInput.lateral * thrustLateral,
             DroneInput.vertical * thrustVertical,
             DroneInput.forward * thrustForward
-        ) * тягаFactor, ForceMode.Force);
+        ) * тягаFactor;
+        _rb.AddRelativeForce(_силыЛок, ForceMode.Force);
 
-        _rb.AddRelativeTorque(
-            Vector3.up * DroneInput.yaw * torqueYaw * тягаFactor,
-            ForceMode.Force
-        );
+        float моментРыскания = DroneInput.yaw * torqueYaw * тягаFactor;
+        _rb.AddRelativeTorque(Vector3.up * моментРыскания, ForceMode.Force);
 
-        ПрименитьСопротивлениеВоды();
-        ПрименитьСопротивлениеВращению();
+        // Порядок важен: сопротивлению (неявная схема) нужна сумма прочих сил шага,
+        // присоединённой массе — сумма всех сил, включая сопротивление.
         ПрименитьПлавучесть();
-        ПрименитьПрисоединённуюМассу();
         ПрименитьЗаморозкуСноса();
+        ПрименитьСопротивлениеВоды();
+        ПрименитьСопротивлениеВращению(new Vector3(0f, моментРыскания, 0f));
+        ПрименитьПрисоединённуюМассу();
 
         if (_contactCount == 0)
             ПрименитьВосстанавливающийМомент();
@@ -216,9 +233,11 @@ public class RovController : MonoBehaviour
     void ПрименитьЗаморозкуСноса()
     {
         if (!_заморозкаСноса) return;
-        _rb.AddForce(-_rb.linearVelocity * СилаЗаморозкиСноса, ForceMode.Acceleration);
+        Vector3 гашение = -_rb.linearVelocity * СилаЗаморозкиСноса * _rb.mass;
         if (ЧистаяПоложительнаяПлавучесть_Н != 0f)
-            _rb.AddForce(Vector3.down * ЧистаяПоложительнаяПлавучесть_Н, ForceMode.Force);   // гасим всплытие
+            гашение += Vector3.down * ЧистаяПоложительнаяПлавучесть_Н;   // гасим всплытие
+        _rb.AddForce(гашение, ForceMode.Force);
+        _силыЛок += transform.InverseTransformDirection(гашение);
     }
 
     // Чистая положительная плавучесть: у Rigidbody выключена гравитация (вес и
@@ -228,24 +247,29 @@ public class RovController : MonoBehaviour
     // аппарат медленно всплывает — это и есть штатная пассивная безопасность ROV.
     void ПрименитьПлавучесть()
     {
-        if (ЧистаяПоложительнаяПлавучесть_Н != 0f)
-            _rb.AddForce(Vector3.up * ЧистаяПоложительнаяПлавучесть_Н, ForceMode.Force);
+        if (ЧистаяПоложительнаяПлавучесть_Н == 0f) return;
+        Vector3 F = Vector3.up * ЧистаяПоложительнаяПлавучесть_Н;
+        _rb.AddForce(F, ForceMode.Force);
+        _силыЛок += transform.InverseTransformDirection(F);
     }
 
     // Присоединённая масса воды (added mass, модель Фоссена): при ускорении
     // аппарат разгоняет прилегающий слой воды, что проявляется как добавочная
-    // инерция, разная по осям корпуса. Реализовано ЯВНОЙ силой, противоположной
-    // ускорению: F_a = −m_a·a, где ускорение берётся конечной разностью скорости
-    // между шагами физики (a = Δv/Δt) в СВЯЗАННЫХ осях. Это стандартный явный
-    // способ; коэффициенты заданы как доля массы Rigidbody и намеренно занижены
-    // ради устойчивости решателя (явная схема на прошлом ускорении). Массу самого
-    // Rigidbody не трогаем — иначе поехал бы критерий повреждений E=½mv².
+    // инерция, разная по осям корпуса: (m + m_a)·a = ΣF, т.е. F_a = −m_a·a.
+    //
+    // Раньше ускорение брали конечной разностью скорости ПРОШЛОГО шага (явная схема).
+    // Испытания показали запаздывание: в момент включения/выключения тяги прошлое
+    // ускорение ещё нулевое, и первый шаг аппарат разгонялся/тормозил «без воды» —
+    // время разгона −4 %, выбег по вертикали (m_a = 0,5·m) до −6 %.
+    //
+    // Теперь — без запаздывания: ускорение этого шага известно из суммы известных сил
+    // ΣF (тяга, сопротивление, плавучесть, гашение сноса), a = ΣF/(m + m_a), откуда
+    //     F_a = −m_a/(m + m_a)·ΣF = −k/(1 + k)·ΣF,   k = m_a/m (доли по осям).
+    // Точно и безусловно устойчиво. Массу самого Rigidbody не трогаем — иначе поехал
+    // бы критерий повреждений E = ½mv².
     void ПрименитьПрисоединённуюМассу()
     {
-        float dt = Time.fixedDeltaTime;
-        Vector3 vLocal = transform.InverseTransformDirection(_rb.linearVelocity);
-        Vector3 aLocal = (vLocal - _prevVLocal) / dt;
-        _prevVLocal = vLocal;
+        _prevVLocal = transform.InverseTransformDirection(_rb.linearVelocity);
 
         // На КОНТАКТЕ (удар о дно/трубу) скорость меняется рывком → конечная разность
         // даёт огромное «ускорение», а сила присоединённой массы направлена по скорости
@@ -254,10 +278,11 @@ public class RovController : MonoBehaviour
         // не прикладываем: added mass — модель разгона воды в СВОБОДНОМ потоке, не удара.
         if (_contactCount > 0) return;
 
+        static float Доля(float k) => k / (1f + Mathf.Max(0f, k));
         Vector3 addedForceLocal = new Vector3(
-            -ПрисМассаБоковая      * _rb.mass * aLocal.x,
-            -ПрисМассаВертикальная * _rb.mass * aLocal.y,
-            -ПрисМассаПродольная   * _rb.mass * aLocal.z
+            -Доля(ПрисМассаБоковая)      * _силыЛок.x,
+            -Доля(ПрисМассаВертикальная) * _силыЛок.y,
+            -Доля(ПрисМассаПродольная)   * _силыЛок.z
         );
         _rb.AddRelativeForce(addedForceLocal, ForceMode.Force);
     }
@@ -279,52 +304,95 @@ public class RovController : MonoBehaviour
 
         Vector3 vLocal = transform.InverseTransformDirection(_rb.linearVelocity - vВоды);
 
-        float Fx = -0.5f * ПлотностьВоды * CxБорт * ПлощадьБорт * vLocal.x * Mathf.Abs(vLocal.x);
-        float Fy = -0.5f * ПлотностьВоды * CxВерх * ПлощадьВерх * vLocal.y * Mathf.Abs(vLocal.y);
-        float Fz = -0.5f * ПлотностьВоды * CxНос  * ПлощадьНос  * vLocal.z * Mathf.Abs(vLocal.z);
-
-        // Сила считается по скорости начала шага (явная схема). У лёгкого аппарата на
-        // большой скорости она могла бы за один шаг не просто остановить, а развернуть
-        // движение — пошла бы раскачка. Сопротивление физически не может сделать больше,
-        // чем погасить относительную скорость, поэтому ограничиваем его этим пределом.
-        float предел = _rb.mass / Time.fixedDeltaTime;
-        Fx = ОграничитьГашение(Fx, предел * Mathf.Abs(vLocal.x));
-        Fy = ОграничитьГашение(Fy, предел * Mathf.Abs(vLocal.y));
-        Fz = ОграничитьГашение(Fz, предел * Mathf.Abs(vLocal.z));
+        // F = −k·v·|v|, k = ½·ρ·Cx·S — по НЕЯВНОЙ (линеаризованной) схеме, как и
+        // сопротивление вращению: сила берётся по скорости КОНЦА шага.
+        //   a  = Δt·k·|v|/m',   m' = m·(1 + kₐ) — масса с присоединённой водой;
+        //   F  = −(k·v·|v| + a·F₀)/(1 + a),  F₀ — прочие силы шага по оси (тяга, плавучесть…)
+        //   ⇒  v' = (v + Δt·F₀/m')/(1 + a).
+        // Явная схема (по скорости начала шага) на выбеге каждый шаг чуть завышала
+        // торможение: испытания показали пути выбега короче теории на 2–8 %. Неявная
+        // устойчива при любой массе (ограничитель «погасить за шаг» больше не нужен),
+        // даёт точную установившуюся скорость, а выбег 1/v' = 1/v + Δt·k/m' совпадает
+        // с точным решением m'·dv/dt = −k·v².
+        float dt = Time.fixedDeltaTime, ρ = ПлотностьВоды, m = _rb.mass;
+        float Неявно(float v, float k, float kA, float F0)
+        {
+            float mЭф = m * (1f + Mathf.Max(0f, kA));
+            float a = dt * k * Mathf.Abs(v) / mЭф;
+            return -(k * v * Mathf.Abs(v) + a * F0) / (1f + a);
+        }
+        float Fx = Неявно(vLocal.x, 0.5f * ρ * CxБорт * ПлощадьБорт, ПрисМассаБоковая,      _силыЛок.x);
+        float Fy = Неявно(vLocal.y, 0.5f * ρ * CxВерх * ПлощадьВерх, ПрисМассаВертикальная, _силыЛок.y);
+        float Fz = Неявно(vLocal.z, 0.5f * ρ * CxНос  * ПлощадьНос,  ПрисМассаПродольная,   _силыЛок.z);
 
         _rb.AddRelativeForce(new Vector3(Fx, Fy, Fz), ForceMode.Force);
+        _силыЛок += new Vector3(Fx, Fy, Fz);
     }
 
-    void ПрименитьСопротивлениеВращению()
+    // Сопротивление вращению M = −c·ω·|ω| — по НЕЯВНОЙ (линеаризованной) схеме.
+    //
+    // Почему не явной. Корпус по курсу лёгкий (Iyy ≈ 0,6 кг·м²), а c велико, поэтому
+    // постоянная времени вращения I/(c·|ω|) ≈ 0,012 с — меньше шага физики 0,02 с
+    // («жёсткая» ось). Явная схема, считающая момент по скорости НАЧАЛА шага, за один
+    // шаг гасила почти всю скорость: на испытаниях угол выбега после разворота
+    // получался на 25 % меньше теоретического.
+    //
+    // Неявная схема берёт сопротивление по скорости КОНЦА шага, линеаризуя квадрат
+    // по текущей |ω| (a = Δt·c·|ω|/I):
+    //     ω' = (ω + Δt·τ/I) / (1 + a)   ⇒   M = −(c·ω·|ω| + a·τ) / (1 + a),
+    // где τ — прочий момент по этой оси за шаг (у рыскания — момент движителей;
+    // без него сместилась бы установившаяся скорость). Свойства: устойчива при любом
+    // шаге и массе (ограничитель «погасить за шаг» больше не нужен — |M| ≤ I·|ω|/Δt
+    // выполняется сам), установившаяся скорость точная (c·ω² = τ), а свободный выбег
+    // 1/ω' = 1/ω + Δt·c/I совпадает с точным решением dω/dt = −c·ω²/I.
+    void ПрименитьСопротивлениеВращению(Vector3 прочийМомент)
     {
         Vector3 wLocal = transform.InverseTransformDirection(_rb.angularVelocity);
+        float dt = Time.fixedDeltaTime, c = КоэффСопротивленияВращению;
+
+        float Неявно(float w, float τ, float I)
+        {
+            float a = dt * c * Mathf.Abs(w) / Mathf.Max(1e-4f, I);
+            return -(c * w * Mathf.Abs(w) + a * τ) / (1f + a);
+        }
 
         Vector3 dragTorque = new Vector3(
-            -КоэффСопротивленияВращению * wLocal.x * Mathf.Abs(wLocal.x),
-            -КоэффСопротивленияВращению * wLocal.y * Mathf.Abs(wLocal.y),
-            -КоэффСопротивленияВращению * wLocal.z * Mathf.Abs(wLocal.z)
-        );
-
-        // То же ограничение, что у поступательного сопротивления: момент не больше, чем
-        // нужно, чтобы погасить вращение за шаг (I·|ω|/Δt). Иначе при малой массе
-        // (меньше момент инерции) аппарат начинал бы дрожать по курсу и крену.
-        float dt = Time.fixedDeltaTime;
-        dragTorque.x = ОграничитьГашение(dragTorque.x, МоментИнерции(Vector3.right)   * Mathf.Abs(wLocal.x) / dt);
-        dragTorque.y = ОграничитьГашение(dragTorque.y, МоментИнерции(Vector3.up)      * Mathf.Abs(wLocal.y) / dt);
-        dragTorque.z = ОграничитьГашение(dragTorque.z, МоментИнерции(Vector3.forward) * Mathf.Abs(wLocal.z) / dt);
+            Неявно(wLocal.x, прочийМомент.x, МоментИнерции(Vector3.right)),
+            Неявно(wLocal.y, прочийМомент.y, МоментИнерции(Vector3.up)),
+            Неявно(wLocal.z, прочийМомент.z, МоментИнерции(Vector3.forward)));
 
         _rb.AddRelativeTorque(dragTorque, ForceMode.Force);
     }
 
-    static float ОграничитьГашение(float сила, float предел) => Mathf.Clamp(сила, -предел, предел);
 
-    // Момент инерции корпуса относительно оси в связанных осях, кг·м²
-    // (тензор Unity задан в главных осях, повёрнутых на inertiaTensorRotation).
-    float МоментИнерции(Vector3 осьЛокально)
+    // Тензор инерции — в осях аппарата. Unity вычисляет его сам по форме коллайдеров,
+    // и у несимметричной 3D-модели главные оси выходят повёрнутыми на 5–7° относительно
+    // осей корпуса: тогда разворот «перетекает» в крен/тангаж, и рысканье ведёт себя
+    // не как ось аппарата (испытания: угол выбега −8 %). Реальный ROV проектируют
+    // симметричным, поэтому главные моменты (их величины от Unity сохраняются) кладём
+    // на оси корпуса. Вызывается и после смены массы (PhysicsSettings) — тензор
+    // пересчитывается под новую массу.
+    public void ВыровнятьИнерцию()
     {
-        Vector3 e = Quaternion.Inverse(_rb.inertiaTensorRotation) * осьЛокально;
+        if (_rb == null) _rb = GetComponent<Rigidbody>();
+        _rb.ResetInertiaTensor();
         Vector3 I = _rb.inertiaTensor;
-        return I.x * e.x * e.x + I.y * e.y * e.y + I.z * e.z * e.z;
+        _rb.inertiaTensor = I;
+        _rb.inertiaTensorRotation = Quaternion.identity;
+    }
+
+    // Эффективный момент инерции корпуса относительно оси (связанные оси), кг·м²:
+    // во что превращается момент вдоль этой оси — Iэф = 1/(e·I⁻¹·e). Тензор Unity задан
+    // в главных осях, повёрнутых на inertiaTensorRotation; если главные оси корпуса не
+    // совпадают с осями аппарата (несимметричный корпус), проекция e·I·e дала бы не то.
+    float МоментИнерции(Vector3 осьЛокально) => МоментИнерции(_rb, осьЛокально);
+
+    public static float МоментИнерции(Rigidbody rb, Vector3 осьЛокально)
+    {
+        Vector3 e = Quaternion.Inverse(rb.inertiaTensorRotation) * осьЛокально.normalized;
+        Vector3 I = rb.inertiaTensor;
+        float обр = e.x * e.x / Mathf.Max(1e-6f, I.x) + e.y * e.y / Mathf.Max(1e-6f, I.y) + e.z * e.z / Mathf.Max(1e-6f, I.z);
+        return 1f / Mathf.Max(1e-9f, обр);
     }
 
     // Метацентрический восстанавливающий момент: момент пропорционален

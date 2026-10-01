@@ -65,6 +65,10 @@ public class RovAutopilot : MonoBehaviour
         public float kd = 0f;
         [Tooltip("Предел накопленного интеграла (анти-виндап)")]
         public float integralClamp = 1f;
+        [Tooltip("Защита от интегрального насыщения (условное интегрирование): пока выход " +
+                 "упёрся в предел тяги и ошибка тянет дальше в ту же сторону, интеграл не копится. " +
+                 "Без неё при долгом ходе на пределе И-звено набирает «запас» и даёт проскок уставки.")]
+        public bool антиНасыщение = false;
 
         float _integral, _prevError;
         bool _hasPrev;
@@ -86,9 +90,12 @@ public class RovAutopilot : MonoBehaviour
         // Вариант с внешней производной: Д-звено берёт готовую оценку скорости
         // изменения ошибки (от наблюдателя), а не численную разность — разность
         // шумного/ступенчатого сигнала даёт выбросы.
-        public float Update(float error, float derivative, float dt)
+        public float Update(float error, float derivative, float dt, float предел = float.PositiveInfinity)
         {
-            _integral = Mathf.Clamp(_integral + error * dt, -integralClamp, integralClamp);
+            float новый = Mathf.Clamp(_integral + error * dt, -integralClamp, integralClamp);
+            float выход = kp * error + ki * новый + kd * derivative;
+            // В насыщении и ошибка «тянет дальше» — не копим (условное интегрирование).
+            if (!(антиНасыщение && Mathf.Abs(выход) > предел && выход * error > 0f)) _integral = новый;
             _prevError = error;
             _hasPrev = true;
 
@@ -128,7 +135,10 @@ public class RovAutopilot : MonoBehaviour
     // мёртвая зона, гасящая его вход) не успевает набрать это давление — и аппарат
     // потихоньку всплывает, «сводится наверх». Поэтому И сделан сильнее и с большим
     // запасом накопления.
-    public Pid depthPid = new Pid { kp = 1.2f, ki = 0.25f, kd = 0.6f, integralClamp = 4f };
+    // Настройка подобрана на стенде испытаний (RovManeuverTests, ступенька +2 м, 2026-10-01):
+    //   исходная 1.2 / 0.25 / 0.6 без защиты — перерегулирование 37,6 %, установление 13,2 с;
+    //   итоговая 2.0 / 0.15 / 2.0 с защитой от насыщения — 2 %, 4,8 с.
+    public Pid depthPid = new Pid { kp = 2f, ki = 0.15f, kd = 2f, integralClamp = 4f, антиНасыщение = true };
 
     public enum ИсточникГлубины { Датчик, Истина }
 
@@ -210,6 +220,20 @@ public class RovAutopilot : MonoBehaviour
     private float _прошлаяVy; private bool _естьПрошлаяVy;
     private float _appliedVert, _appliedFwd, _appliedLat;
     private float _рампа;   // 0..1, плавный ввод автопилота в работу после включения
+    private int _шаговДоОценки; // после переноса аппарата: столько шагов оценка = показанию датчика
+
+    // Аппарат мгновенно перенесли (испытательный стенд ставит его в исходную точку).
+    // Фильтр «помнит» старое место: без сброса он несколько секунд считал бы прежнюю
+    // глубину, а медленная поправка смещения акселерометра (масштаб T³ ≈ 27 с) сбилась
+    // бы от скачка — и каждый опыт начинался бы в разных условиях. Сбрасываем как при
+    // включении питания; 0,3 с ждём свежего опроса датчика давления (он 5 Гц).
+    public void СброситьОценку()
+    {
+        _фильтрГотов = false;
+        _естьПрошлаяVy = false;
+        _вертСкорость = 0f; _смещение = 0f;
+        _шаговДоОценки = Mathf.CeilToInt(0.3f / Time.fixedDeltaTime);
+    }
 
     void Awake()
     {
@@ -217,6 +241,38 @@ public class RovAutopilot : MonoBehaviour
         _rb = GetComponent<Rigidbody>();
         // Статика переживает вход в Play Mode, если отключён Domain Reload — сбрасываем явно.
         RovSystems.depthHoldActive = false;
+        ЗагрузитьНастройку();
+    }
+
+    // Настройка регулятора глубины, подобранная оператором на стенде испытаний
+    // (RovManeuverTests, «Настройка автопилота») и запомненная кнопкой «ЗАПОМНИТЬ».
+    // Если сохранённой нет — работают значения из сцены.
+    const string Kkp = "ap_kp", Kki = "ap_ki", Kkd = "ap_kd", Kaw = "ap_aw", Kmax = "ap_max";
+    public static bool ЕстьСохранённаяНастройка => PlayerPrefs.HasKey(Kkp);
+
+    void ЗагрузитьНастройку()
+    {
+        if (!ЕстьСохранённаяНастройка) return;
+        depthPid.kp = PlayerPrefs.GetFloat(Kkp, depthPid.kp);
+        depthPid.ki = PlayerPrefs.GetFloat(Kki, depthPid.ki);
+        depthPid.kd = PlayerPrefs.GetFloat(Kkd, depthPid.kd);
+        depthPid.антиНасыщение = PlayerPrefs.GetInt(Kaw, depthPid.антиНасыщение ? 1 : 0) == 1;
+        maxAuthority = PlayerPrefs.GetFloat(Kmax, maxAuthority);
+        Debug.Log($"[RovAutopilot] Настройка со стенда: Kp={depthPid.kp} Ki={depthPid.ki} Kd={depthPid.kd} " +
+                  $"защита={(depthPid.антиНасыщение ? "вкл" : "выкл")} предел={maxAuthority}");
+    }
+
+    public void ЗапомнитьНастройку()
+    {
+        PlayerPrefs.SetFloat(Kkp, depthPid.kp); PlayerPrefs.SetFloat(Kki, depthPid.ki); PlayerPrefs.SetFloat(Kkd, depthPid.kd);
+        PlayerPrefs.SetInt(Kaw, depthPid.антиНасыщение ? 1 : 0); PlayerPrefs.SetFloat(Kmax, maxAuthority);
+        PlayerPrefs.Save();
+    }
+
+    public static void ЗабытьНастройку()
+    {
+        foreach (var k in new[] { Kkp, Kki, Kkd, Kaw, Kmax }) PlayerPrefs.DeleteKey(k);
+        PlayerPrefs.Save();
     }
 
     void OnDestroy() { if (Instance == this) Instance = null; }
@@ -248,6 +304,14 @@ public class RovAutopilot : MonoBehaviour
     public void ВосстановитьУдержание(float глубина_м)
     {
         Engage();
+        _targetDepth_m = глубина_м;
+        RovSystems.depthHoldTarget_m = глубина_м;
+    }
+
+    // Новая уставка глубины без перезапуска регулятора (ступенчатое воздействие
+    // в испытаниях: переходная характеристика контура глубины).
+    public void ЗадатьГлубину(float глубина_м)
+    {
         _targetDepth_m = глубина_м;
         RovSystems.depthHoldTarget_m = глубина_м;
     }
@@ -307,7 +371,7 @@ public class RovAutopilot : MonoBehaviour
         // разрешено свободно покачиваться в вихрях, ПИД молчит. Держим слой, не точку.
         float yErrorCtl = ApplyDeadband(yError, depthDeadband_m);
         // Д-звено: d(yError)/dt = dĥ/dt = v̂ (уставка постоянна).
-        float vertCmd = Mathf.Clamp(depthPid.Update(yErrorCtl, _вертСкорость, dt), -maxAuthority, maxAuthority) * k;
+        float vertCmd = Mathf.Clamp(depthPid.Update(yErrorCtl, _вертСкорость, dt, maxAuthority), -maxAuthority, maxAuthority) * k;
 
         // --- Гашение сноса по обеим горизонтальным осям ---
         // Течение почти никогда не идёт точно вдоль курса, поэтому гасить только
@@ -354,6 +418,7 @@ public class RovAutopilot : MonoBehaviour
         }
 
         float h = RovSystems.depth_m;
+        if (_шаговДоОценки > 0) { _шаговДоОценки--; _фильтрГотов = false; }
         if (!_фильтрГотов || !RovSystems.telemetryValid)
         {
             _глубинаФильтр_m = h;

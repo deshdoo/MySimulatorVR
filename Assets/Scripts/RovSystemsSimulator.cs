@@ -179,7 +179,11 @@ public class RovSystemsSimulator : MonoBehaviour
         float dt = Time.fixedDeltaTime;
 
         // 1. Навигация
-        Vector3 pos = transform.position;
+        // Позиция и поворот — ФИЗИЧЕСКИЕ (Rigidbody), а не Transform: у аппарата включена
+        // интерполяция, и в FixedUpdate Transform хранит сглаженную для экрана позу
+        // прошлого кадра — она отстаёт от физики. Датчики, читающие истину отсюда,
+        // получали бы лишнее запаздывание (заметно в контуре автопилота глубины).
+        Vector3 pos = _rb != null ? _rb.position : transform.position;
         // ИСТИННАЯ глубина — то, что движок знает точно. Показание датчика depth_m
         // формирует уже RovDepthSensor (давление → погрешности → обратный расчёт).
         // Здесь ставим depth_m = истине как безопасное значение по умолчанию: если
@@ -187,7 +191,7 @@ public class RovSystemsSimulator : MonoBehaviour
         RovSystems.уровеньПоверхности_Y = УровеньПоверхностиВоды;
         RovSystems.depthTrue_m = Mathf.Max(0f, УровеньПоверхностиВоды - pos.y);
         RovSystems.depth_m = RovSystems.depthTrue_m;
-        Vector3 e = transform.eulerAngles;
+        Vector3 e = (_rb != null ? _rb.rotation : transform.rotation).eulerAngles;
         // ИСТИННЫЙ курс — то, что движок знает точно. Показание курсоуказателя
         // heading_deg формирует RovHeadingSensor (гироскоп с дрейфом + компас +
         // фильтр). По умолчанию (без датчика в сцене) показание = истине.

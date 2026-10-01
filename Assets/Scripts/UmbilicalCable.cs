@@ -285,6 +285,18 @@ public class UmbilicalCable : MonoBehaviour
         joint.enablePreprocessing = false; // стабильнее для длинных цепочек
     }
 
+    // Испытательные манёвры (RovManeuverTests) переносят аппарат в исходную точку
+    // перед каждым опытом. Чтобы трос не дёргало через всю сцену и он не мешал
+    // столкновениями, на время испытаний звенья выключаются целиком.
+    public void ЗаморозитьДляИспытаний(bool заморозить)
+    {
+        if (_segments != null)
+            foreach (var s in _segments) if (s != null) s.gameObject.SetActive(!заморозить);
+        if (_rovAnchor != null) _rovAnchor.gameObject.SetActive(!заморозить);
+        if (line != null) line.enabled = !заморозить;
+        enabled = !заморозить;
+    }
+
     void FixedUpdate()
     {
         if (_segments == null) return;

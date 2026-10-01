@@ -129,7 +129,7 @@ public static class PhysicsSettings
             rov.thrustForward = т.x; rov.thrustVertical = т.y; rov.thrustLateral = т.z; rov.torqueYaw = т.w;
 
             var rb = rov.GetComponent<Rigidbody>();
-            if (rb != null) rb.mass = масса;
+            if (rb != null) { rb.mass = масса; rov.ВыровнятьИнерцию(); }   // тензор — под новую массу, в осях корпуса
             rov.ПлотностьВоды = ρ;
             rov.ЧистаяПоложительнаяПлавучесть_Н = ПлавучестьПри(запас, ρ, масса);
             if (rov.Течение != null) rov.Течение.Множитель = течение;

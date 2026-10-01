@@ -23984,10 +23984,11 @@ MonoBehaviour:
   pitchStrength: 4
   levelDamping: 2.5
   depthPid:
-    kp: 1.2
-    ki: 0.25
-    kd: 0.6
+    kp: 2
+    ki: 0.15
+    kd: 2
     integralClamp: 4
+    "\u0430\u043D\u0442\u0438\u041D\u0430\u0441\u044B\u0449\u0435\u043D\u0438\u0435": 1
   surgeBrakeGain: 0.8
   swayBrakeGain: 0.8
   depthDeadband_m: 0.002
