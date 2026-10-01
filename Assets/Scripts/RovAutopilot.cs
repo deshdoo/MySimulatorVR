@@ -141,6 +141,7 @@ public class RovAutopilot : MonoBehaviour
     public Pid depthPid = new Pid { kp = 2f, ki = 0.15f, kd = 2f, integralClamp = 4f, антиНасыщение = true };
 
     public enum ИсточникГлубины { Датчик, Истина }
+    public enum ИсточникСноса { ДоплеровскийЛаг, Истина }
 
     [Header("Обратная связь по глубине")]
     [Tooltip("Датчик — показание датчика давления (RovSystems.depth_m), как у реального аппарата. " +
@@ -158,6 +159,11 @@ public class RovAutopilot : MonoBehaviour
     public float ШумАкселерометраСКО = 0.03f;
 
     [Header("Гашение сноса")]
+    [Tooltip("ДоплеровскийЛаг — скорость над дном от DVL (RovSpeedSensor), как у реального аппарата: " +
+             "без захвата дна снос гасить нечем, и аппарат дрейфует. Истина — скорость из движка, только для сравнения.")]
+    public ИсточникСноса источникСноса = ИсточникСноса.ДоплеровскийЛаг;
+    [Tooltip("Измерение лага старше этого, с, считается потерянным (лаг молчит — тормозить нечем).")]
+    public float УстареваниеЛага_с = 0.6f;
     [Tooltip("Коэффициент торможения ПРОДОЛЬНОЙ скорости. Меньше = допускает лёгкий снос/покачивание.")]
     public float surgeBrakeGain = 0.8f;
     [Tooltip("Коэффициент торможения БОКОВОЙ скорости (лаг). Без него течение под углом к курсу " +
@@ -378,10 +384,15 @@ public class RovAutopilot : MonoBehaviour
         // продольную составляющую недостаточно: боковая уводит аппарат вбок.
         // Мёртвая зона driftDeadband_mps: мелкий снос от вихрей не трогаем (аппарат
         // лениво дрейфует), парируем лишь заметный уход — это и есть «дрейф с ПИД».
-        float surgeVel = Vector3.Dot(_rb.linearVelocity, transform.forward);
-        float swayVel  = Vector3.Dot(_rb.linearVelocity, transform.right);
-        float fwdCmd = Mathf.Clamp(-surgeBrakeGain * ApplyDeadband(surgeVel, driftDeadband_mps), -maxAuthority, maxAuthority) * k;
-        float latCmd = Mathf.Clamp(-swayBrakeGain  * ApplyDeadband(swayVel,  driftDeadband_mps), -maxAuthority, maxAuthority) * k;
+        // Скорость над дном — от доплеровского лага (по прибору, а не из движка).
+        // Нет захвата дна или лаг давно молчит — гасить снос нечем: команды ноль,
+        // аппарат дрейфует с течением, как реальный ROV без DVL.
+        float fwdCmd = 0f, latCmd = 0f;
+        if (СкоростьНадДном(out float surgeVel, out float swayVel))
+        {
+            fwdCmd = Mathf.Clamp(-surgeBrakeGain * ApplyDeadband(surgeVel, driftDeadband_mps), -maxAuthority, maxAuthority) * k;
+            latCmd = Mathf.Clamp(-swayBrakeGain  * ApplyDeadband(swayVel,  driftDeadband_mps), -maxAuthority, maxAuthority) * k;
+        }
 
         // --- Плавное подведение команд тяги ---
         float s = 1f - Mathf.Exp(-responseSmoothing * dt);
@@ -393,6 +404,32 @@ public class RovAutopilot : MonoBehaviour
         DroneInput.forward = _appliedFwd;
         DroneInput.lateral = _appliedLat;
         DroneInput.yaw = 0f;   // курс не трогаем — рысканье не командуем
+    }
+
+    // Есть ли снос гасить по лагу (для HUD/телеметрии): false — нет захвата дна.
+    public bool СносГасится { get; private set; }
+
+    // Продольная и боковая скорость над дном в осях аппарата для гашения сноса.
+    bool СкоростьНадДном(out float продольная, out float боковая)
+    {
+        продольная = боковая = 0f;
+        var лаг = RovSpeedSensor.Instance;
+        if (источникСноса == ИсточникСноса.Истина || лаг == null || !лаг.isActiveAndEnabled)
+        {
+            // Без прибора в сцене — по движку (обратная совместимость).
+            продольная = Vector3.Dot(_rb.linearVelocity, transform.forward);
+            боковая    = Vector3.Dot(_rb.linearVelocity, transform.right);
+            return СносГасится = true;
+        }
+        bool есть = лаг.ЗахватДна && Time.time - лаг.ВремяИзмерения <= УстареваниеЛага_с;
+        if (есть != СносГасится && Engaged)
+            Debug.Log(есть ? "[RovAutopilot] Лаг захватил дно — гашу снос по DVL"
+                           : "[RovAutopilot] Лаг потерял дно — снос гасить нечем, аппарат дрейфует");
+        СносГасится = есть;
+        if (!есть) return false;
+        Vector3 v = лаг.СкоростьНадДном;   // оси аппарата: x вправо, z вперёд
+        продольная = v.z; боковая = v.x;
+        return true;
     }
 
     // Оценка глубины ĥ и вертикальной скорости v̂ для регулятора (см. шапку файла).
