@@ -102,9 +102,14 @@ public class CurrentFieldVisualizer : MonoBehaviour
     {
         // Подписи всегда лицом к камере аппарата (её видит оператор на мониторе).
         if (!Показывать || _подписи.Count == 0) return;
-        if (_камера == null)
-            foreach (var c in FindObjectsByType<Camera>(FindObjectsSortMode.None))
-                if (c.targetTexture != null && c.enabled) { _камера = c; break; }
+        if (_камера == null || !_камера.enabled)
+        {
+            // Бортовая камера; если её подменила камера учебного показа — та, что сейчас пишет в монитор.
+            _камера = RovCameraRig.Бортовая();
+            if (_камера == null || !_камера.enabled)
+                foreach (var c in FindObjectsByType<Camera>(FindObjectsSortMode.None))
+                    if (c.enabled && c.targetTexture != null && c.name.StartsWith("Камера наблюдения")) { _камера = c; break; }
+        }
         if (_камера == null) _камера = Camera.main;
         if (_камера == null) return;
         foreach (var p in _подписи)

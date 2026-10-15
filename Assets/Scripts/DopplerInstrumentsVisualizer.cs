@@ -35,8 +35,19 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 
 [DisallowMultipleComponent]
-public class DopplerInstrumentsVisualizer : MonoBehaviour
+public class DopplerInstrumentsVisualizer : MonoBehaviour, IДемонстрацияПрибора
 {
+    // ---- учебный показ в окне «?» → «Работа приборов» (IДемонстрацияПрибора) ----
+    public string Название => "Доплеровский лаг";
+    public string Описание => "как прибор измеряет скорость над дном и течение (эффект Доплера, 4 луча)";
+    public int Порядок => 10;
+    public bool Показано => Показывать;
+    public string Состояние => "скорость " +
+                               (_множитель > 0.9f ? "1×" : _множитель > 0.4f ? "½×" : "¼×") + (_пауза ? " · пауза" : "");
+    public void СменитьВид() { if (Показывать) ВидСбоку(!_видСбоку); }
+    public void Пауза() => _пауза = !_пауза;
+    public void СменитьСкорость() => _множитель = _множитель > 0.9f ? 0.5f : _множитель > 0.4f ? 0.25f : 1f;
+
     [Header("Клавиши")]
     public Key клавишаDVL = Key.F3;
     public Key клавишаВида = Key.F6;
@@ -135,7 +146,7 @@ public class DopplerInstrumentsVisualizer : MonoBehaviour
         Кадр();
     }
 
-    void Переключить()
+    public void Переключить()
     {
         Показывать = !Показывать;
         if (_корень == null && Показывать) Построить();
@@ -341,9 +352,7 @@ public class DopplerInstrumentsVisualizer : MonoBehaviour
     // =========================================================== камера и панель
     void ВидСбоку(bool вкл)
     {
-        if (_камМонитора == null)
-            foreach (var c in FindObjectsByType<Camera>(FindObjectsSortMode.None))
-                if (c.targetTexture != null && c != _камСбоку) { _камМонитора = c; break; }
+        if (_камМонитора == null) _камМонитора = RovCameraRig.Бортовая();
         if (_камМонитора == null) { _видСбоку = false; return; }
 
         if (вкл && _камСбоку == null)
@@ -548,13 +557,9 @@ public class DopplerInstrumentsVisualizer : MonoBehaviour
         // Слой камеры монитора: объекты вне её маски на мониторе не видны.
         _слой = LayerMask.NameToLayer("Underwater");
         if (_слой < 0) _слой = 0;
-        foreach (var c in FindObjectsByType<Camera>(FindObjectsSortMode.None))
-            if (c.targetTexture != null)
-            {
-                if ((c.cullingMask & (1 << _слой)) == 0)
-                    for (int b = 0; b < 32; b++) if ((c.cullingMask & (1 << b)) != 0) { _слой = b; break; }
-                break;
-            }
+        var c = RovCameraRig.Бортовая();
+        if (c != null && (c.cullingMask & (1 << _слой)) == 0)
+            for (int b = 0; b < 32; b++) if ((c.cullingMask & (1 << b)) != 0) { _слой = b; break; }
 
         // Шрифт — тот же, что на мониторах пульта (с кириллицей), если найдётся.
         foreach (var t in FindObjectsByType<TMP_Text>(FindObjectsSortMode.None))

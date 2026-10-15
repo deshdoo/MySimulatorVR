@@ -104,6 +104,8 @@ public class MissionDebriefPanel : MonoBehaviour
     float _подтверждениеДо = -1f;
     readonly SceneFreeze _заморозка = new SceneFreeze();
     string _путьОтчёта;
+    // Итоговый отчёт (и состояние для «Продолжить») записан в архив — можно уходить в меню.
+    public bool ОтчётСохранён => _путьОтчёта != null;
 
     static MissionStats S => MissionStats.Instance;
 

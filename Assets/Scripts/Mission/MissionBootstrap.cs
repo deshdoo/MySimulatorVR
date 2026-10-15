@@ -211,8 +211,8 @@ public class MissionBootstrap : MonoBehaviour
     // Камера бортового вида НПА = та, что рендерит в RenderTexture (её показывает монитор).
     Transform НайтиКамеруВида()
     {
-        foreach (var c in FindObjectsByType<Camera>(FindObjectsSortMode.None))
-            if (c.targetTexture != null) return c.transform;
+        var c = RovCameraRig.Бортовая();
+        if (c != null) return c.transform;
         return Camera.main != null ? Camera.main.transform : null;
     }
 

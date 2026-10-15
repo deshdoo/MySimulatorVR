@@ -35,8 +35,26 @@ public class UmbilicalCable : MonoBehaviour
     public Transform rov;
     [Tooltip("Точка выхода кабеля в локальных координатах корпуса (например, корма/верх)")]
     public Vector3 localAnchorOffset = new Vector3(0f, 0.1f, -0.6f);
+    [Tooltip("Точка заделки кабеля на модели аппарата. Пусто — скоба подвеса «Скоба» (кабель идёт вместе с грузовым тросом), иначе «ТочкаЗаделкиКабеля» " +
+             "(или «ЗаделкаКабеля») среди дочерних объектов НПА; не нашлась — берётся localAnchorOffset.")]
+    public Transform точкаЗаделки;
     [Tooltip("Тянуть аппарат натяжением троса (двусторонняя связь). Выкл — трос висит на дроне, но не двигает его")]
     public bool pullRov = false;
+
+    [Tooltip("Натяжение троса действует на аппарат: сила в первом суставе (у заделки) прикладывается " +
+             "к корпусу в точке заделки. В отличие от pullRov, связь через силу, а не жёстким суставом — " +
+             "устойчиво при любом соотношении масс троса и аппарата.")]
+    public bool натяжениеНаАппарат = true;
+    [Tooltip("Предел силы натяжения на корпус, Н (страховка от рывков при старте/переносе аппарата).")]
+    public float предельНатяжения_Н = 400f;
+    [Tooltip("Натяжение, выше которого оператору выдаётся предупреждение «кабель натянут», Н.")]
+    public float порогПредупреждения_Н = 120f;
+
+    [Header("Паспорт «Марлин-350»")]
+    [Tooltip("Взять параметры кабеля по классу «Марлин-350»: оптоэлектрический кабель Ø15 мм, " +
+             "плотность чуть выше воды (≈1080 кг/м³ — слабо отрицательная плавучесть, в воде весит ≈10 г/м). " +
+             "Перекрывает радиус и плотность из инспектора.")]
+    public bool параметрыМарлин350 = true;
 
     [Header("Второй конец (база)")]
     [Tooltip("Крепить дальний конец к базе. Выкл — трос свободно тянется за аппаратом и лежит на дне")]
@@ -75,6 +93,13 @@ public class UmbilicalCable : MonoBehaviour
     public LineRenderer line;
     [Tooltip("Сглаживание: сколько точек рисовать между соседними звеньями (1 = ломаная по звеньям, 6+ = плавная кривая)")]
     [Range(1, 12)] public int renderSubdivisions = 6;
+    [Tooltip("Цвет кабеля (у «Марлина-350» — жёлтый оптоэлектрический кабель).")]
+    public Color цветКабеля = new Color(0.95f, 0.62f, 0.02f);
+    [Tooltip("Рисовать кабель объёмной трубкой с освещённым материалом (блик, тень, реальный диаметр) " +
+             "вместо плоской линии. Выкл — прежний LineRenderer.")]
+    public bool объёмныйКабель = true;
+    [Tooltip("Граней по окружности трубки.")]
+    [Range(4, 16)] public int граней = 8;
 
     Rigidbody[] _segments;
     Rigidbody _baseAnchor;         // кинематический якорь в точке управления (если attachToBase)
@@ -84,6 +109,14 @@ public class UmbilicalCable : MonoBehaviour
     Vector3 _fixedBasePoint;       // запасная точка крепления базы (на дне под стартом дрона), если база не задана явно
     Vector3[] _controlPoints;      // опорные точки для сглаживающего сплайна (концы + центры звеньев)
 
+    WaterCurrent _течение;
+    Vector3 _натяжение;            // сглаженная сила троса на корпус, Н
+    float _времяСтарта;
+    bool _предупреждён;
+
+    // Текущее натяжение троса у заделки, Н (для телеметрии и предупреждений).
+    public float Натяжение_Н => _натяжение.magnitude;
+
     // Текущая фактическая длина троса (по звеньям), м.
     public float CableLength { get; private set; }
 
@@ -91,19 +124,47 @@ public class UmbilicalCable : MonoBehaviour
     {
         Instance = this;
         if (line == null) line = GetComponent<LineRenderer>();
+        if (параметрыМарлин350)
+        {
+            cableRadius_m = 0.0075f;
+            cableDensity = 1080f;
+        }
+        if (line != null)
+        {
+            // Толщина линии = реальный диаметр кабеля (не тоньше 1,5 см, чтобы был виден в шлеме).
+            line.widthCurve = AnimationCurve.Constant(0f, 1f, 1f);
+            line.widthMultiplier = Mathf.Max(2f * cableRadius_m, 0.015f);
+            line.startColor = line.endColor = цветКабеля;
+            var m = line.material;   // свой экземпляр материала, общий ассет не трогаем
+            if (m != null)
+            {
+                if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", цветКабеля);
+                if (m.HasProperty("_Color")) m.SetColor("_Color", цветКабеля);
+            }
+        }
         _segmentLength = totalCableLength_m / Mathf.Max(1, segmentCount);
     }
 
     void Start()
     {
         if (rov != null)
+        {
             _rovBody = rov.GetComponent<Rigidbody>() ?? rov.GetComponentInParent<Rigidbody>();
+            var rc = rov.GetComponentInParent<RovController>();
+            if (rc != null) _течение = rc.Течение;
+            if (точкаЗаделки == null)
+                foreach (var t in rov.GetComponentsInChildren<Transform>(true))
+                    if (t.name == "Скоба" || (точкаЗаделки == null && (t.name == "ТочкаЗаделкиКабеля" || t.name == "ЗаделкаКабеля")))
+                        точкаЗаделки = t;   // кабель-трос с грузовым тросом приходят к скобе подвеса
+        }
 
         BuildChain();
+        _времяСтарта = Time.time;
     }
 
     Vector3 AnchorOnRov()
     {
+        if (точкаЗаделки != null) return точкаЗаделки.position;
         return rov != null ? rov.TransformPoint(localAnchorOffset) : transform.position;
     }
 
@@ -294,6 +355,7 @@ public class UmbilicalCable : MonoBehaviour
             foreach (var s in _segments) if (s != null) s.gameObject.SetActive(!заморозить);
         if (_rovAnchor != null) _rovAnchor.gameObject.SetActive(!заморозить);
         if (line != null) line.enabled = !заморозить;
+        if (_трубка != null) _трубка.gameObject.SetActive(!заморозить);
         enabled = !заморозить;
     }
 
@@ -312,6 +374,31 @@ public class UmbilicalCable : MonoBehaviour
             _baseAnchor.MovePosition(BaseWorldPoint());
 
         ApplyUnderwaterForces();
+        ПриложитьНатяжение();
+    }
+
+    // Натяжение троса → корпус. Первый сустав держит звено 0 у заделки; сила, с которой
+    // он действует на звено (Joint.currentForce, мировые оси), по третьему закону
+    // Ньютона с обратным знаком действует на точку заделки на аппарате. Так снос троса
+    // течением, его вес и зацеп за трубу реально тянут аппарат (раньше трос только
+    // висел на нём). Сглаживание ~0,2 с убирает шум цепочки суставов, первые 2 с после
+    // старта сила плавно нарастает (трос раскладывается и успокаивается).
+    void ПриложитьНатяжение()
+    {
+        if (!натяжениеНаАппарат || pullRov || _rovBody == null || _segments == null || _segments.Length == 0) return;
+        var j = _segments[0].GetComponent<ConfigurableJoint>();
+        if (j == null) return;
+
+        Vector3 F = -j.currentForce;
+        float dt = Time.fixedDeltaTime;
+        _натяжение = Vector3.Lerp(_натяжение, F, 1f - Mathf.Exp(-dt / 0.2f));
+        float разгон = Mathf.Clamp01((Time.time - _времяСтарта) / 2f);
+        Vector3 Fк = Vector3.ClampMagnitude(_натяжение, предельНатяжения_Н) * разгон;
+        _rovBody.AddForceAtPosition(Fк, AnchorOnRov(), ForceMode.Force);
+
+        bool натянут = Натяжение_Н > порогПредупреждения_Н;
+        if (натянут && !_предупреждён) Debug.Log($"[Кабель] Натянут: {Натяжение_Н:F0} Н — потравить кабель или вернуться к базе");
+        _предупреждён = натянут;
     }
 
     // Гидродинамика звена по модели Морисона (каноническая модель нагрузки на
@@ -339,7 +426,9 @@ public class UmbilicalCable : MonoBehaviour
             // у цилиндра это принципиально разные режимы обтекания с разными
             // коэффициентами и разной опорной площадью.
             Vector3 axis = rb.transform.up;                    // локальная +Y капсулы = ось звена
-            Vector3 v = rb.linearVelocity;
+            // Сопротивление — от скорости ОТНОСИТЕЛЬНО ВОДЫ (как у корпуса): течение
+            // сносит трос, а снесённый трос тянет аппарат (см. ПриложитьНатяжение).
+            Vector3 v = rb.linearVelocity - (_течение != null ? _течение.Скорость(rb.position) : Vector3.zero);
             Vector3 vT = Vector3.Dot(v, axis) * axis;          // вдоль оси
             Vector3 vN = v - vT;                                // поперёк оси
 
@@ -377,7 +466,7 @@ public class UmbilicalCable : MonoBehaviour
         // выглядел как гибкий деформирующийся кабель, а не ломаная из отрезков.
         int sub = Mathf.Max(1, renderSubdivisions);
         int totalPoints = (cc - 1) * sub + 1;
-        if (line.positionCount != totalPoints) line.positionCount = totalPoints;
+        if (_точки == null || _точки.Length != totalPoints) _точки = new Vector3[totalPoints];
 
         int idx = 0;
         for (int seg = 0; seg < cc - 1; seg++)
@@ -390,10 +479,167 @@ public class UmbilicalCable : MonoBehaviour
             for (int s = 0; s < sub; s++)
             {
                 float u = (float)s / sub;
-                line.SetPosition(idx++, CentripetalCatmullRom(p0, p1, p2, p3, u));
+                _точки[idx++] = CentripetalCatmullRom(p0, p1, p2, p3, u);
             }
         }
-        line.SetPosition(idx, _controlPoints[cc - 1]); // замыкающая точка
+        _точки[idx] = _controlPoints[cc - 1]; // замыкающая точка
+
+        if (объёмныйКабель)
+        {
+            line.enabled = false;
+            Трубка(_точки);
+        }
+        else
+        {
+            if (_трубка != null) _трубка.gameObject.SetActive(false);
+            line.enabled = true;
+            if (line.positionCount != totalPoints) line.positionCount = totalPoints;
+            line.SetPositions(_точки);
+        }
+    }
+
+    // ---- объёмная трубка по сплайну ----
+    // Кабель-трос «Марлина» идёт в паре с грузовым тросом: две линии вплотную, стянутые
+    // хомутами через равные промежутки, обе приходят к скобе подвеса на аппарате. Физика
+    // одна (это одна связка), рисуются три меша: жёлтый кабель, серый трос и хомуты.
+    Vector3[] _точки;
+    ТрубкаМеш _кабель, _трос, _хомуты;
+    Transform _трубка;   // общий родитель мешей (для включения/выключения)
+    Vector3[] _кас, _норм, _бин;
+    readonly System.Collections.Generic.List<int> _гдеХомуты = new System.Collections.Generic.List<int>();
+
+    class ТрубкаМеш
+    {
+        public MeshFilter mf; public Mesh меш;
+        public Vector3[] в, н; int[] тр; int n, m, кусков;
+
+        public ТрубкаМеш(Transform родитель, string имя, Color цвет, float гладкость, int слой)
+        {
+            var go = new GameObject(имя) { layer = слой };
+            go.transform.SetParent(родитель, false);
+            mf = go.AddComponent<MeshFilter>();
+            var mr = go.AddComponent<MeshRenderer>();
+            var sh = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+            var мат = new Material(sh) { name = имя + " (авто)" };
+            if (мат.HasProperty("_BaseColor")) мат.SetColor("_BaseColor", цвет);
+            if (мат.HasProperty("_Color")) мат.SetColor("_Color", цвет);
+            if (мат.HasProperty("_Smoothness")) мат.SetFloat("_Smoothness", гладкость);
+            if (мат.HasProperty("_Metallic")) мат.SetFloat("_Metallic", гладкость > 0.6f ? 0.9f : 0f);
+            mr.sharedMaterial = мат;
+            меш = new Mesh { name = имя }; меш.MarkDynamic(); mf.sharedMesh = меш;
+        }
+
+        // Сетка «кусков» по n колец из m вершин (каждый кусок — отдельная трубка).
+        public void Сетка(int колец, int граней, int кусков_)
+        {
+            if (в != null && n == колец && m == граней && кусков == кусков_) return;
+            n = колец; m = граней; кусков = кусков_;
+            в = new Vector3[кусков * n * m]; н = new Vector3[в.Length];
+            тр = new int[кусков * (n - 1) * m * 6];
+            int t = 0;
+            for (int k = 0; k < кусков; k++)
+                for (int i = 0; i < n - 1; i++)
+                    for (int j = 0; j < m; j++)
+                    {
+                        int o = k * n * m;
+                        int a = o + i * m + j, b = o + i * m + (j + 1) % m, c = a + m, d = b + m;
+                        тр[t++] = a; тр[t++] = c; тр[t++] = b; тр[t++] = b; тр[t++] = c; тр[t++] = d;
+                    }
+            меш.Clear(); меш.vertices = в; меш.triangles = тр;
+        }
+
+        public void Кольцо(int кусок, int i, Vector3 центр, Vector3 нрм, Vector3 бн, float r)
+        {
+            for (int j = 0; j < m; j++)
+            {
+                float ф = j * Mathf.PI * 2f / m;
+                Vector3 рад = нрм * Mathf.Cos(ф) + бн * Mathf.Sin(ф);
+                int idx = кусок * n * m + i * m + j;
+                в[idx] = центр + рад * r; н[idx] = рад;
+            }
+        }
+
+        public void Применить() { меш.vertices = в; меш.normals = н; меш.RecalculateBounds(); }
+    }
+
+    [Header("Грузовой трос рядом с кабелем")]
+    [Tooltip("Рисовать стальной грузовой трос вплотную к кабелю, стянутый хомутами.")]
+    public bool тросРядом = true;
+    [Tooltip("Радиус грузового троса, м.")]
+    public float радиусТроса_м = 0.005f;
+    [Tooltip("Шаг хомутов вдоль кабеля, м.")]
+    public float шагХомутов_м = 2.5f;
+
+    void Трубка(Vector3[] pts)
+    {
+        int n = pts.Length, m = Mathf.Max(4, граней);
+        // После перекомпиляции во время Play обычные классы (ТрубкаМеш) обнуляются, а объект
+        // остаётся — пересоздаём всё заново.
+        if (_трубка != null && (_кабель == null || _трос == null || _хомуты == null)) { Destroy(_трубка.gameObject); _трубка = null; }
+        if (_трубка == null)
+        {
+            var go = new GameObject("Кабель-трос (меш)") { layer = line.gameObject.layer };
+            go.transform.SetParent(transform, false);
+            _трубка = go.transform;
+            _кабель = new ТрубкаМеш(_трубка, "Кабель", цветКабеля, 0.45f, go.layer);
+            _трос = new ТрубкаМеш(_трубка, "Грузовой трос", new Color(0.55f, 0.56f, 0.58f), 0.7f, go.layer);
+            _хомуты = new ТрубкаМеш(_трубка, "Хомуты", new Color(0.04f, 0.04f, 0.045f), 0.3f, go.layer);
+        }
+        _трубка.gameObject.SetActive(true);
+        // Вершины — в мировых координатах: держим объект в начале мира без поворота и масштаба.
+        _трубка.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+        Vector3 ls = transform.lossyScale;
+        _трубка.localScale = new Vector3(1f / Mathf.Max(1e-4f, ls.x), 1f / Mathf.Max(1e-4f, ls.y), 1f / Mathf.Max(1e-4f, ls.z));
+
+        // Рамки вдоль кривой — параллельным переносом (кольца не перекручиваются).
+        if (_кас == null || _кас.Length != n) { _кас = new Vector3[n]; _норм = new Vector3[n]; _бин = new Vector3[n]; }
+        Vector3 касПрев = (pts[Mathf.Min(1, n - 1)] - pts[0]).normalized;
+        if (касПрев.sqrMagnitude < 1e-6f) касПрев = Vector3.down;
+        Vector3 нормаль = Vector3.Cross(касПрев, Mathf.Abs(касПрев.y) > 0.9f ? Vector3.right : Vector3.up).normalized;
+        for (int i = 0; i < n; i++)
+        {
+            Vector3 кас = pts[Mathf.Min(i + 1, n - 1)] - pts[Mathf.Max(i - 1, 0)];
+            if (кас.sqrMagnitude < 1e-8f) кас = касПрев; else кас.Normalize();
+            нормаль = (Quaternion.FromToRotation(касПрев, кас) * нормаль).normalized;
+            _кас[i] = кас; _норм[i] = нормаль; _бин[i] = Vector3.Cross(кас, нормаль);
+            касПрев = кас;
+        }
+
+        float rК = Mathf.Max(cableRadius_m, 0.006f);
+        float rТ = Mathf.Max(радиусТроса_м, 0.003f);
+        float сдвиг = rК + rТ;   // трос вплотную к кабелю
+
+        _кабель.Сетка(n, m, 1);
+        for (int i = 0; i < n; i++) _кабель.Кольцо(0, i, pts[i], _норм[i], _бин[i], rК);
+        _кабель.Применить();
+
+        _трос.mf.gameObject.SetActive(тросРядом);
+        _хомуты.mf.gameObject.SetActive(тросРядом);
+        if (!тросРядом) return;
+
+        _трос.Сетка(n, 6, 1);
+        for (int i = 0; i < n; i++) _трос.Кольцо(0, i, pts[i] + _норм[i] * сдвиг, _норм[i], _бин[i], rТ);
+        _трос.Применить();
+
+        // Хомуты — короткие широкие кольца, охватывающие оба, через шагХомутов_м по длине.
+        var где = _гдеХомуты; где.Clear();
+        float пройдено = 0f, след = 0.4f;   // первый хомут — у самой скобы
+        for (int i = 1; i < n; i++)
+        {
+            пройдено += Vector3.Distance(pts[i - 1], pts[i]);
+            if (пройдено >= след) { где.Add(i); след += Mathf.Max(0.3f, шагХомутов_м); }
+        }
+        int хом = Mathf.Max(1, где.Count);
+        _хомуты.Сетка(2, 10, хом);
+        float rХ = сдвиг * 0.5f + rК + 0.004f;   // охватывает пару
+        for (int k = 0; k < хом; k++)
+        {
+            int i = где.Count > 0 ? где[k] : 0;
+            Vector3 ц = pts[i] + _норм[i] * сдвиг * 0.5f;
+            _хомуты.Кольцо(k, 0, ц - _кас[i] * 0.02f, _норм[i], _бин[i], rХ);
+            _хомуты.Кольцо(k, 1, ц + _кас[i] * 0.02f, _норм[i], _бин[i], rХ);
+        }
+        _хомуты.Применить();
     }
 
     // Центростремительный сплайн Катмулла-Рома (α = 0.5). Проходит точно через

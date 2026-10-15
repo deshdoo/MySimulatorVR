@@ -32,6 +32,17 @@ public static class RovSystems
     public static float reservePercent     = 100.0f;   // резерв (статический «hardcoded» запас)
     public static SystemState powerState   = SystemState.OK;
 
+    // Питание по кабелю-тросу («Марлин-350»: с судна, 3 кВт). Бортовой главной АКБ нет:
+    // batteryVoltage_V — напряжение, дошедшее до аппарата по кабелю (после падения на жилах),
+    // batteryCharge_Ah/batteryPercent — заряд РЕЗЕРВНОЙ батареи (единственной на борту).
+    public static float linePower_W        = 0.0f;     // мощность, отбираемая с судна, Вт (с потерями в кабеле)
+    public static float linePowerLimit_W   = 3000f;    // предел мощности судового блока, Вт (паспорт: 3 кВт)
+    public static float cableLoss_W        = 0.0f;     // потери в жилах кабеля I²R, Вт
+    public static float powerLimitFactor   = 1.0f;     // доля тяги, которую пропускает предел мощности (1 — без ограничения)
+    public static float toolPower_W        = 0.0f;     // мощность инструмента закручивания на борту, Вт
+    public static bool  cableBroken        = false;    // обрыв кабеля-троса: нет питания и связи
+    public static bool  toolInstalled      = false;    // в комплектации есть инструмент закручивания
+
     // ---------------- ДВИЖИТЕЛИ ----------------
     public static float thrusterTemp_C     = 25.0f;    // температура движителей, °C
     public static float thrusterPower_W    = 0.0f;     // суммарная электрическая мощность движителей, Вт

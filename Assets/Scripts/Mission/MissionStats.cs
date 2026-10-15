@@ -172,9 +172,7 @@ public class MissionStats : MonoBehaviour
         // Камера бортового вида (рендерит в RenderTexture монитора) — с неё фотофиксация.
         if (RovScanner.Instance != null && RovScanner.Instance.Камера != null)
             _камераОсмотра = RovScanner.Instance.Камера.GetComponent<Camera>();
-        if (_камераОсмотра == null)
-            foreach (var c in FindObjectsByType<Camera>(FindObjectsSortMode.None))
-                if (c.targetTexture != null) { _камераОсмотра = c; break; }
+        if (_камераОсмотра == null) _камераОсмотра = RovCameraRig.Бортовая();
 
         if (ЗонаОсмотра_м <= 0f)
             ЗонаОсмотра_м = RovScanner.Instance != null ? RovScanner.Instance.ДальностьСканирования : 4f;

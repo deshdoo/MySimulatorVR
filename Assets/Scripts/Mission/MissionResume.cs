@@ -51,7 +51,8 @@ public static class MissionResume
 
         // Ёмкость батареи могли уменьшить в настройках после сохранения — заряд не выше ёмкости.
         var сим = Object.FindFirstObjectByType<RovSystemsSimulator>();
-        if (з.зарядАч > 0f) RovSystems.batteryCharge_Ah = сим != null ? Mathf.Min(з.зарядАч, сим.ЁмкостьАКБ) : з.зарядАч;
+        // Заряд на борту — резервная АКБ (главной у «Марлина» нет: питание по кабелю).
+        if (з.зарядАч > 0f && сим != null) сим.ЗарядРезерва_Ач = з.зарядАч;
         if (з.повреждения != null && з.повреждения.Length >= 5)
         {
             RovSystems.thrusterDamage = з.повреждения[0]; RovSystems.cameraDamage = з.повреждения[1];

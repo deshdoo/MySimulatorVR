@@ -190,6 +190,21 @@ public class RovController : MonoBehaviour
         // Вся телеметрия миссии — в CSV (Excel/Python, графики для ВКР).
         if (GetComponent<TelemetryCsvLogger>() == null)
             gameObject.AddComponent<TelemetryCsvLogger>();
+        // Винты модели «Марлин-350» крутятся по командам движителей (без модели — ничего не делает).
+        if (GetComponent<RovThrusterVisuals>() == null)
+            gameObject.AddComponent<RovThrusterVisuals>();
+        // Захват «Марлина» по кнопке захвата; старая клешня Blueye прячется.
+        if (GetComponent<RovMarlinGripper>() == null)
+            gameObject.AddComponent<RovMarlinGripper>();
+        // Три камеры «Марлина» на одном видеоканале: курсовая / коннектор / захват (клавиша C).
+        if (GetComponent<RovCameraRig>() == null)
+            gameObject.AddComponent<RovCameraRig>();
+        // Гидролокатор кругового обзора (паспорт «Марлина»: 900 кГц, 360°, до 60 м).
+        if (GetComponent<RovSonar>() == null)
+            gameObject.AddComponent<RovSonar>();
+        // F2 — учебная анимация гидролокатора на данных рабочего прибора.
+        if (GetComponent<SonarInstrumentVisualizer>() == null)
+            gameObject.AddComponent<SonarInstrumentVisualizer>();
     }
 
     void FixedUpdate()
@@ -203,6 +218,9 @@ public class RovController : MonoBehaviour
         float тягаFactor = RovSystems.thrusterDamage >= 2 ? ТягаПриТяжёломУроне
                          : RovSystems.thrusterDamage == 1 ? ТягаПриЛёгкомУроне
                          : 1f;
+        // Питание по кабелю: при упоре в предел мощности (3 кВт) блок управления урезает
+        // тягу всех движителей одинаково; при обрыве кабеля питания движителей нет вовсе.
+        тягаFactor *= Mathf.Clamp01(RovSystems.powerLimitFactor);
 
         _силыЛок = new Vector3(
             DroneInput.lateral * thrustLateral,

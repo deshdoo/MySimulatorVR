@@ -656,18 +656,65 @@ public class RovManeuverTests : MonoBehaviour
         Transform голова = риг != null && риг.Camera != null ? риг.Camera.transform : Camera.main != null ? Camera.main.transform : null;
         var hud = FindFirstObjectByType<MissionHudDisplay>(FindObjectsInactive.Include);
         _панель = new VrPanel("ПанельИспытаний", 1000, 640, 0.85f, gameObject.scene, hud != null ? hud.шрифт : null, false);
-        if (голова != null)
+        if (!ПоставитьУМониторов() && голова != null)
         {
             Vector3 f = Vector3.ProjectOnPlane(голова.forward, Vector3.up).normalized;
             if (f.sqrMagnitude < 0.01f) f = Vector3.forward;
             Vector3 вправо = Vector3.Cross(Vector3.up, f);
-            // Слева от мониторов пульта, повёрнута к оператору (не перекрывает экраны).
+            // Запасной вариант (мониторы не найдены): левее взгляда, повёрнута к оператору.
             Vector3 поз = голова.position + f * 1.0f - вправо * 0.85f + Vector3.up * 0.1f;
             _панель.Корень.transform.SetPositionAndRotation(поз, Quaternion.LookRotation(поз - голова.position, Vector3.up));
         }
         _панель.Прямоугольник(_панель.Rt, 0, 0, 1000, 640, _панель.ЦветФона);
         _панель.Прямоугольник(_панель.Rt, 0, 0, 1000, 4, _панель.ЦветАкцент);
         _экран = _панель.Контейнер(_панель.Rt, "Экран");
+    }
+
+    // Постоянное место панели — по пульту, а не по голове: слева от левого нижнего монитора
+    // («Состояние НПА»), правым краем у монитора, повёрнута в пол-оборота (45°) к креслу.
+    // Низ панели — на уровне низа монитора (над столом). Если до левой стены мало места —
+    // панель уменьшается, чтобы не входить в стену.
+    bool ПоставитьУМониторов()
+    {
+        const float Зазор_м = 0.67f, НазадОтЭкрана_м = -0.15f, Наклон_град = 60f, ОтступОтСтены_м = 0.08f, МинШирина_м = 0.55f;
+        var дисплей = FindFirstObjectByType<SystemStatusDisplay>(FindObjectsInactive.Include);
+        var холст = дисплей != null ? дисплей.GetComponentInParent<Canvas>(true) : null;
+        var риг = FindFirstObjectByType<XROrigin>();
+        if (холст == null || риг == null) return false;
+
+        // Стороны — от кресла пилота (точка рига), а не по осям холста: холст монитора
+        // в сцене может быть развёрнут или отзеркален, и его «лево» тогда не левое.
+        var углы = new Vector3[4];
+        ((RectTransform)холст.transform).GetWorldCorners(углы);
+        Vector3 центрЭкрана = (углы[0] + углы[1] + углы[2] + углы[3]) * 0.25f;
+        Vector3 кПилоту = Vector3.ProjectOnPlane(риг.transform.position - центрЭкрана, Vector3.up).normalized;
+        if (кПилоту.sqrMagnitude < 0.01f) return false;
+        Vector3 вправо = Vector3.Cross(Vector3.up, -кПилоту);   // вправо, как видит пилот
+        float левыйКрай = float.PositiveInfinity, низ = float.PositiveInfinity;
+        foreach (var у in углы) { левыйКрай = Mathf.Min(левыйКрай, Vector3.Dot(у - центрЭкрана, вправо)); низ = Mathf.Min(низ, у.y); }
+        Vector3 петля = центрЭкрана + вправо * (левыйКрай - Зазор_м) - кПилоту * НазадОтЭкрана_м;   // правый край панели
+        петля.y = низ + 0.13f;
+
+        // Сторона панели (как видит оператор): уходит влево и к оператору.
+        Vector3 вдоль = Quaternion.AngleAxis(-Наклон_град, Vector3.up) * -вправо;
+        float ширина = 0.85f;
+        float доСтены = float.PositiveInfinity;
+        // Самое дальнее попадание влево в пределах 2.5 м — стена (колонки и стойки на пути не в счёт).
+        foreach (var h in Physics.RaycastAll(петля + Vector3.up * 0.3f, -вправо, 2.5f, ~0, QueryTriggerInteraction.Ignore))
+            доСтены = float.IsPositiveInfinity(доСтены) ? h.distance : Mathf.Max(доСтены, h.distance);
+        if (!float.IsPositiveInfinity(доСтены))
+        {
+            float влезает = (доСтены - ОтступОтСтены_м) / Vector3.Dot(вдоль, -вправо);
+            ширина = Mathf.Clamp(влезает, МинШирина_м, ширина);
+        }
+        _панель.Rt.localScale = Vector3.one * (ширина / _панель.W);
+
+        float высота = ширина * _панель.H / _панель.W;
+        Vector3 центр = петля + вдоль * (ширина * 0.5f) + Vector3.up * (высота * 0.5f);
+        // Лицо панели — к оператору: «вперёд» холста направлено от зрителя.
+        Vector3 лицо = Vector3.Cross(Vector3.up, вдоль);   // вперёд холста, от оператора
+        _панель.Корень.transform.SetPositionAndRotation(центр, Quaternion.LookRotation(лицо, Vector3.up));
+        return true;
     }
 
     void Шапка(string подзаголовок)

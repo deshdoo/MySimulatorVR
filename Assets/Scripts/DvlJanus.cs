@@ -57,12 +57,18 @@ public static class DvlJanus
     /// свой корпус, свой кабель и подвижные тела — иначе луч вниз упирается в кабель,
     /// висящий под аппаратом, и «дно» оказывается в полуметре.
     /// </summary>
+    // Общий буфер попаданий: RaycastAll создаёт новый массив на каждый луч, а лучей у лага,
+    // эхолота и гидролокатора — сотни в секунду; мусор от них давал рывки сборщика памяти.
+    public static readonly RaycastHit[] Буфер = new RaycastHit[64];
+
     public static bool ЛучДоДна(Transform корпус, Rigidbody свой, Vector3 o, Vector3 d, float макс, out float R)
     {
         R = макс;
         bool есть = false;
-        foreach (var h in Physics.RaycastAll(o, d, макс, ~0, QueryTriggerInteraction.Ignore))
+        int n = Physics.RaycastNonAlloc(o, d, Буфер, макс, ~0, QueryTriggerInteraction.Ignore);
+        for (int i = 0; i < n; i++)
         {
+            var h = Буфер[i];
             if (h.collider.transform.IsChildOf(корпус)) continue;
             if (h.rigidbody != null && h.rigidbody != свой && !h.rigidbody.isKinematic) continue;   // подвижные тела
             if (h.collider.GetComponentInParent<UmbilicalCable>() != null) continue;              // свой кабель (звенья и якоря)

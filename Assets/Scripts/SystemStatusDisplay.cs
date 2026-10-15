@@ -2,6 +2,10 @@
 // SystemStatusDisplay.cs
 // -----------------------------------------------------------------------------
 // Обновление UI первого нижнего монитора по данным из RovSystems.
+// Аппарат — «Марлин-350»: главной батареи нет, питание с судна по кабелю-тросу.
+// Блок «Энергосистема» показывает питание по кабелю: в кольце — загрузка от предела
+// судового блока (3 кВт), «Гл шина» — напряжение, дошедшее до аппарата, «Всп шина» —
+// мощность с судна, «Резерв» — резервная АКБ (единственная на борту). Связь — оптоволокно.
 // =============================================================================
 
 using UnityEngine;
@@ -62,6 +66,17 @@ public class SystemStatusDisplay : MonoBehaviour
     [Tooltip("Скорость перетекания цвета, ед/с (0 — переключать мгновенно)")]
     public float modeFadeSpeed = 8f;
 
+    void Start()
+    {
+        // Подписи на мониторе заданы в сцене под прежний аппарат с батареей — меняем на «Марлин».
+        foreach (var t in FindObjectsByType<TMP_Text>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+        {
+            if (t.name == "Энергосистема") t.text = "   Питание (кабель)";
+            else if (t.name == "Подпись заряд" && t.text.Trim() == "заряд") t.text = "нагр.";
+            else if (t.name == "Камера" && t.text.Trim() == "Камера") t.text = "Камеры";   // у «Марлина» их три
+        }
+    }
+
     void Update()
     {
         Apply(Питание,     RovSystems.powerState,         StateName(RovSystems.powerState));
@@ -69,12 +84,13 @@ public class SystemStatusDisplay : MonoBehaviour
         Apply(Манипулятор, RovSystems.manipulatorState,   RovSystems.grabberClosed ? "ВКЛ" : "ВЫКЛ");
         Apply(Прожекторы,  RovSystems.lightsState,        RovSystems.lightsOn ? "ВКЛ" : "ВЫКЛ");
         Apply(Камера,      RovSystems.cameraState,        StateName(RovSystems.cameraState));
-        Apply(Связь,       RovSystems.communicationState, $"{RovSystems.rssi_dB:F0} дБ");
+        Apply(Связь,       RovSystems.communicationState, RovSystems.cableBroken ? "ОБРЫВ" : "оптика");
 
         // Энергосистема
-        if (ЗарядПроцент         != null) ЗарядПроцент.text         = $"{Mathf.RoundToInt(RovSystems.batteryPercent)}";
-        if (ГлавнаяШина          != null) ГлавнаяШина.text          = $"Гл шина {RovSystems.batteryVoltage_V:F1} В";
-        if (ВспомогательнаяШина  != null) ВспомогательнаяШина.text  = $"Всп шина {RovSystems.auxBusVoltage_V:F1} В";
+        float загрузка = RovSystems.linePowerLimit_W > 0f ? RovSystems.linePower_W / RovSystems.linePowerLimit_W * 100f : 0f;
+        if (ЗарядПроцент         != null) ЗарядПроцент.text         = $"{Mathf.RoundToInt(загрузка)}";
+        if (ГлавнаяШина          != null) ГлавнаяШина.text          = RovSystems.cableBroken ? "Линия: ОБРЫВ" : $"Линия {RovSystems.batteryVoltage_V:F0} В";
+        if (ВспомогательнаяШина  != null) ВспомогательнаяШина.text  = $"Судно {RovSystems.linePower_W / 1000f:F1} кВт";
         if (Резерв               != null) Резерв.text               = $"Резерв {Mathf.RoundToInt(RovSystems.reservePercent)} %";
         if (Кольцо               != null) Кольцо.color              = ColorFor(RovSystems.powerState);
 

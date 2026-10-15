@@ -2,10 +2,13 @@ using UnityEngine;
 
 // Автопилот стабилизации ("Удержание") НПА.
 // По включению приводит аппарат к ровному, "как при запуске" состоянию и держит его:
-//   - ВЫРАВНИВАНИЕ ГОРИЗОНТА: тангаж и крен -> 0 (корпус встаёт прямо),
-//     КУРС НЕ ТРОГАЕТСЯ — аппарат остаётся смотреть туда же, куда смотрел;
-//   - удержание глубины (ПИД по вертикали);
-//   - гашение продольного и бокового сноса.
+//   - ВЫРАВНИВАНИЕ ГОРИЗОНТА: тангаж и крен -> 0 (корпус встаёт прямо);
+//   - удержание КУРСА, на котором включили (ПД по рысканью по курсоуказателю —
+//     гироскоп + компас). Паспорт «Марлин-350»: стабилизация по курсу ±5°;
+//   - удержание глубины (ПИД по вертикали). Паспорт: стабилизация по глубине ±0,5 м;
+//   - гашение продольного и бокового сноса — ТОЛЬКО если установлен доплеровский
+//     лаг (дополнительное оборудование, в паспорте его нет). Без лага скорость над
+//     дном мерить нечем, и аппарат, как серийный, дрейфует с течением.
 //
 // Удержание — «живое», не мёртвое: держим не точку, а узкую ЗОНУ (мёртвые зоны по
 // глубине и сносу). В пределах зоны регулятор молчит, и аппарат свободно
@@ -127,6 +130,18 @@ public class RovAutopilot : MonoBehaviour
     [Tooltip("Демпфирование колебаний при выравнивании. Больше = плавнее, без перелёта.")]
     public float levelDamping = 2.5f;
 
+    [Header("Удержание курса (по курсоуказателю)")]
+    [Tooltip("Держать курс, на котором включили автопилот (паспорт «Марлин-350»: ±5°).")]
+    public bool держатьКурс = true;
+    [Tooltip("П-коэффициент по курсу: команда рысканья на 1° ошибки.")]
+    public float курсKp = 0.05f;
+    [Tooltip("Д-коэффициент по курсу: команда рысканья на 1 °/с скорости поворота (гасит перелёт).")]
+    public float курсKd = 0.06f;
+    [Tooltip("Мёртвая зона по курсу, град: внутри неё рысканье не командуется (аппарат «дышит» в вихрях).")]
+    public float курсМёртваяЗона_град = 0.5f;
+    [Tooltip("Предел команды рысканья автопилота (доля полной).")]
+    public float курсПредел = 0.5f;
+
     [Header("ПИД глубины (вертикаль)")]
     // ki/integralClamp подняты специально: у корпуса есть ПОСТОЯННАЯ положительная
     // плавучесть (_RovController_.ЧистаяПоложительнаяПлавучесть_Н, ~1 Н вверх). Чтобы
@@ -198,6 +213,10 @@ public class RovAutopilot : MonoBehaviour
 
     public bool Engaged { get; private set; }
 
+    // Удержание курса: уставка и ошибка (по ПОКАЗАНИЮ курсоуказателя), град.
+    public float TargetHeading_deg => _курсУставка;
+    public float HeadingError_deg { get; private set; }
+
     // --- Телеметрия контура регулирования (для графиков на втором мониторе) ---
     // Классическая тройка ТАУ: уставка, ошибка регулирования, управляющее воздействие.
     // Уставка глубины, м (то, что держим).
@@ -224,7 +243,9 @@ public class RovAutopilot : MonoBehaviour
     private bool  _фильтрГотов;
     private float _вертСкорость, _смещение;
     private float _прошлаяVy; private bool _естьПрошлаяVy;
-    private float _appliedVert, _appliedFwd, _appliedLat;
+    private float _appliedVert, _appliedFwd, _appliedLat, _appliedYaw;
+    private float _курсУставка, _курсПрошлый;
+    private bool _естьКурсПрошлый;
     private float _рампа;   // 0..1, плавный ввод автопилота в работу после включения
     private int _шаговДоОценки; // после переноса аппарата: столько шагов оценка = показанию датчика
 
@@ -300,9 +321,12 @@ public class RovAutopilot : MonoBehaviour
         _appliedVert = DroneInput.vertical; // подхватываем текущее положение рычагов
         _appliedFwd = DroneInput.forward;
         _appliedLat = DroneInput.lateral;
+        _appliedYaw = DroneInput.yaw;
+        _курсУставка = RovSystems.heading_deg;   // держим тот курс, что ПОКАЗЫВАЕТ прибор
+        _естьКурсПрошлый = false;
 
         Debug.Log($"[RovAutopilot] ВКЛ. Выравниваю горизонт (тангаж={NormalizeAngle(transform.eulerAngles.x):F1}°, " +
-                  $"крен={NormalizeAngle(transform.eulerAngles.z):F1}°), курс оставляю={transform.eulerAngles.y:F1}°, держим глубину={_targetDepth_m:F2} м ({источникГлубины})");
+                  $"крен={NormalizeAngle(transform.eulerAngles.z):F1}°), держу курс={_курсУставка:F1}° ({(держатьКурс ? "вкл" : "выкл")}), держим глубину={_targetDepth_m:F2} м ({источникГлубины})");
     }
 
     // Продолжение сохранённой миссии: включить удержание на СОХРАНЁННОЙ глубине,
@@ -394,16 +418,30 @@ public class RovAutopilot : MonoBehaviour
             latCmd = Mathf.Clamp(-swayBrakeGain  * ApplyDeadband(swayVel,  driftDeadband_mps), -maxAuthority, maxAuthority) * k;
         }
 
+        // --- Курс -> _курсУставка (ПД по показанию курсоуказателя) ---
+        // Ошибка — кратчайший угол до уставки (−180…180). Д-звено — скорость поворота по
+        // тому же прибору (его выход сглажен фильтром: на коротких интервалах это гироскоп).
+        float курс = RovSystems.heading_deg;
+        float скоростьКурса = _естьКурсПрошлый && dt > 0f ? Mathf.DeltaAngle(_курсПрошлый, курс) / dt : 0f;
+        _курсПрошлый = курс; _естьКурсПрошлый = true;
+        float ошибкаКурса = Mathf.DeltaAngle(курс, _курсУставка);
+        HeadingError_deg = ошибкаКурса;
+        float yawCmd = 0f;
+        if (держатьКурс)
+            yawCmd = Mathf.Clamp(курсKp * ApplyDeadband(ошибкаКурса, курсМёртваяЗона_град) - курсKd * скоростьКурса,
+                                 -курсПредел, курсПредел) * k;
+
         // --- Плавное подведение команд тяги ---
         float s = 1f - Mathf.Exp(-responseSmoothing * dt);
         _appliedVert = Mathf.Lerp(_appliedVert, vertCmd, s);
         _appliedFwd = Mathf.Lerp(_appliedFwd, fwdCmd, s);
         _appliedLat = Mathf.Lerp(_appliedLat, latCmd, s);
+        _appliedYaw = Mathf.Lerp(_appliedYaw, yawCmd, s);
 
         DroneInput.vertical = _appliedVert;
         DroneInput.forward = _appliedFwd;
         DroneInput.lateral = _appliedLat;
-        DroneInput.yaw = 0f;   // курс не трогаем — рысканье не командуем
+        DroneInput.yaw = _appliedYaw;
     }
 
     // Есть ли снос гасить по лагу (для HUD/телеметрии): false — нет захвата дна.
@@ -414,12 +452,19 @@ public class RovAutopilot : MonoBehaviour
     {
         продольная = боковая = 0f;
         var лаг = RovSpeedSensor.Instance;
-        if (источникСноса == ИсточникСноса.Истина || лаг == null || !лаг.isActiveAndEnabled)
+        if (источникСноса == ИсточникСноса.Истина)
         {
-            // Без прибора в сцене — по движку (обратная совместимость).
+            // Режим сравнения на графике: идеальный прибор (скорость из движка).
             продольная = Vector3.Dot(_rb.linearVelocity, transform.forward);
             боковая    = Vector3.Dot(_rb.linearVelocity, transform.right);
             return СносГасится = true;
+        }
+        if (лаг == null || !лаг.isActiveAndEnabled)
+        {
+            // Лаг не установлен (серийный «Марлин-350»): скорость над дном мерить нечем,
+            // снос не гасится — автопилот держит только курс и глубину, как в паспорте.
+            if (СносГасится && Engaged) Debug.Log("[RovAutopilot] Доплеровского лага нет — снос не гашу, держу курс и глубину");
+            return СносГасится = false;
         }
         bool есть = лаг.ЗахватДна && Time.time - лаг.ВремяИзмерения <= УстареваниеЛага_с;
         if (есть != СносГасится && Engaged)

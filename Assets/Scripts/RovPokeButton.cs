@@ -27,7 +27,7 @@ using UnityEngine.XR.Interaction.Toolkit.Interactors;
 [DisallowMultipleComponent]
 public class RovPokeButton : MonoBehaviour
 {
-    public enum ButtonAction { None, ToggleLights, ToggleAutopilot, ToggleGrabber }
+    public enum ButtonAction { None, ToggleLights, ToggleAutopilot, ToggleGrabber, ToggleCameras, ToggleSonar, ToggleEnvironment, ExitMenu }
 
     [Header("Действие кнопки")]
     [Tooltip("ToggleLights — прожекторы (RovSystems.lightsOn). ToggleAutopilot — удержание (RovAutopilot). ToggleGrabber — клешня (RovSystems.grabberClosed). None — только латч + onPressed.")]
@@ -213,6 +213,10 @@ public class RovPokeButton : MonoBehaviour
             case ButtonAction.ToggleLights:    return RovSystems.lightsOn;
             case ButtonAction.ToggleAutopilot: return RovAutopilot.Instance != null && RovAutopilot.Instance.Engaged;
             case ButtonAction.ToggleGrabber:   return RovSystems.grabberClosed;
+            case ButtonAction.ToggleCameras:   return RovCameraRig.ВидеоВключено;
+            case ButtonAction.ToggleSonar:     return TelemetryGraphSwitcher.ГидролокаторНаЭкране;
+            case ButtonAction.ToggleEnvironment: return CabinPanels.СредаОткрыта;
+            case ButtonAction.ExitMenu:        return CabinPanels.ВыходОткрыт;
             default:                           return _latchedOn;
         }
     }
@@ -231,6 +235,20 @@ public class RovPokeButton : MonoBehaviour
                 break;
             case ButtonAction.ToggleGrabber:
                 RovSystems.grabberClosed = !RovSystems.grabberClosed;
+                break;
+            case ButtonAction.ToggleCameras:
+                // Видео камер коннектора и захвата на Monitor2/Monitor3: вкл/выкл.
+                RovCameraRig.Переключить();
+                break;
+            case ButtonAction.ToggleSonar:
+                // Экран гидролокатора на Monitor2 (поверх графиков) — показать/убрать.
+                TelemetryGraphSwitcher.ПереключитьГидролокатор();
+                break;
+            case ButtonAction.ToggleEnvironment:
+                CabinPanels.ПереключитьСреду();      // окно «Среда»: течение, вихри, слои
+                break;
+            case ButtonAction.ExitMenu:
+                CabinPanels.ПереключитьВыход();      // окно «Выход»: сохранить и в меню / выйти из игры
                 break;
             case ButtonAction.None:
                 _latchedOn = !_latchedOn;
