@@ -98,6 +98,12 @@ public class CabinPanels : MonoBehaviour
 
     void Update()
     {
+        // В режиме испытаний справки о среде нет — иконку «?» прячем.
+        if (_иконкаСправки != null)
+        {
+            bool видна = !RovManeuverTests.Идут && !СредаОткрыта;
+            if (_иконкаСправки.gameObject.activeSelf != видна) _иконкаСправки.gameObject.SetActive(видна);
+        }
         _среда?.Обновить();
         _выход?.Обновить();
         if (_подтвердитьДо > 0f && Time.unscaledTime > _подтвердитьДо) { _подтвердитьДо = -1f; if (ВыходОткрыт) ПостроитьВыход(); }

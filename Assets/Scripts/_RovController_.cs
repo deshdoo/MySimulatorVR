@@ -205,6 +205,9 @@ public class RovController : MonoBehaviour
         // F2 — учебная анимация гидролокатора на данных рабочего прибора.
         if (GetComponent<SonarInstrumentVisualizer>() == null)
             gameObject.AddComponent<SonarInstrumentVisualizer>();
+        // Помощь пилоту: рычаг в нейтрали — держит глубину и курс (выключается в меню «Физика»).
+        if (GetComponent<RovPilotAssist>() == null)
+            gameObject.AddComponent<RovPilotAssist>();
     }
 
     void FixedUpdate()

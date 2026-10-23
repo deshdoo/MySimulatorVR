@@ -45,6 +45,10 @@ public class UmbilicalCable : MonoBehaviour
              "к корпусу в точке заделки. В отличие от pullRov, связь через силу, а не жёстким суставом — " +
              "устойчиво при любом соотношении масс троса и аппарата.")]
     public bool натяжениеНаАппарат = true;
+    [Tooltip("Прикладывать натяжение на высоте центра масс (по вертикали аппарата под точкой заделки). " +
+             "Так делают на реальных аппаратах: кабель заводят через скобу у центра масс, чтобы тяга кабеля " +
+             "не опрокидывала аппарат. ВЫКЛ — сила в самой точке заделки сверху кормы: на ходу задирает нос.")]
+    public bool натяжениеНаУровнеЦентраМасс = true;
     [Tooltip("Предел силы натяжения на корпус, Н (страховка от рывков при старте/переносе аппарата).")]
     public float предельНатяжения_Н = 400f;
     [Tooltip("Натяжение, выше которого оператору выдаётся предупреждение «кабель натянут», Н.")]
@@ -65,10 +69,26 @@ public class UmbilicalCable : MonoBehaviour
     [Header("Геометрия троса")]
     [Tooltip("Число звеньев цепочки. Больше — плавнее и гибче, дороже по физике")]
     public int segmentCount = 20;
-    [Tooltip("Суммарная длина кабеля, м. Должна быть не меньше макс. удаления дрона от базы, иначе трос натянется в струну")]
+    [Tooltip("Вытравленная длина кабеля на старте, м. С автоТравлением лебёдка сама добавит до запасПровиса × расстояние " +
+             "и дальше травит по ходу работы (до длинаНаБарабане_м); без него — постоянная, и дальше неё аппарат не уйдёт.")]
     public float totalCableLength_m = 40f;
     [Tooltip("Радиус кабеля, м (для коллайдера, сопротивления и массы)")]
     public float cableRadius_m = 0.03f;
+
+    [Header("Лебёдка на судне (травление кабеля)")]
+    [Tooltip("Лебёдка сама травит кабель, как оператор лебёдки на судне: держит провис и отдаёт кабель, " +
+             "когда аппарат его натягивает. Выкл — длина кабеля постоянная (totalCableLength_m).")]
+    public bool автоТравление = true;
+    [Tooltip("Всего кабеля на барабане лебёдки, м (паспорт «Марлин-350»: 450 м). Больше вытравить нельзя.")]
+    public float длинаНаБарабане_м = 450f;
+    [Tooltip("Провис, который держит лебёдка: длина кабеля не меньше этой доли от прямой «судно — аппарат». " +
+             "1,3 — на каждые 100 м расстояния 30 м слабины.")]
+    public float запасПровиса = 1.3f;
+    [Tooltip("Натяжение у аппарата, Н, выше которого лебёдка травит сверх обычного провиса " +
+             "(кабель снесло течением или зацепило) — но не больше 1,6 расстояния до судна.")]
+    public float порогТравления_Н = 40f;
+    [Tooltip("Скорость травления, м/с (судовые лебёдки ROV — 0,3–1 м/с).")]
+    public float скоростьЛебёдки_мс = 0.5f;
 
     [Header("Подводная физика (модель Морисона)")]
     [Tooltip("Плотность материала кабеля, кг/м³ (масса звена + вес в воде)")]
@@ -102,6 +122,8 @@ public class UmbilicalCable : MonoBehaviour
     [Range(4, 16)] public int граней = 8;
 
     Rigidbody[] _segments;
+    ConfigurableJoint[] _суставы;  // сустав каждого звена с предыдущим телом (длина звена задаётся их якорями)
+    ConfigurableJoint _суставБазы; // последнее звено — к якорю базы
     Rigidbody _baseAnchor;         // кинематический якорь в точке управления (если attachToBase)
     Rigidbody _rovAnchor;          // кинематический якорь, следующий за НПА (если не pullRov)
     Rigidbody _rovBody;
@@ -191,9 +213,24 @@ public class UmbilicalCable : MonoBehaviour
         if ((endP - startP).sqrMagnitude < 1e-4f)
             endP = startP + Vector3.down * totalCableLength_m; // база совпала со стартом — раскладываем трос вниз
 
-        Vector3 dir = (endP - startP);
-        dir = dir.sqrMagnitude > 1e-4f ? dir.normalized : Vector3.down;
-        Quaternion rot = Quaternion.FromToRotation(Vector3.up, dir);
+        // Лебёдка перед работой отдаёт кабель с провисом: длина не меньше запасПровиса × расстояние.
+        float хорда = Vector3.Distance(startP, endP);
+        if (автоТравление)
+            totalCableLength_m = Mathf.Max(totalCableLength_m, Mathf.Min(хорда * запасПровиса, длинаНаБарабане_м));
+
+        // Звенья кладутся с провисом, встык, каждое — своей полной длины (см. РаскладкаСПровисом).
+        // Раньше они ложились по прямой с шагом «расстояние/число звеньев», а сустав с
+        // autoConfigureConnectedAnchor запоминал этот шаг: фактическая длина кабеля выходила
+        // равной расстоянию до судна на старте (≈99 м вместо 150 м) — аппарат с первой секунды
+        // висел на натянутом кабеле, как маятник: команда «вниз» уводила его по дуге вбок
+        // (к точке под судном) почти без спуска.
+        Vector3[] стыки = РаскладкаСПровисом(startP, endP, totalCableLength_m, out float уложено);
+        if (уложено < totalCableLength_m - 0.5f)
+            Debug.LogWarning($"[Кабель] Уложено {уложено:F0} м из {totalCableLength_m:F0} м " +
+                             (уложено <= хорда + 0.5f ? "— кабель короче расстояния до судна, натянут в струну."
+                                                      : "— провис упёрся в дно."));
+        totalCableLength_m = уложено;
+        _segmentLength = уложено / Mathf.Max(1, segmentCount);
 
         float V = Mathf.PI * cableRadius_m * cableRadius_m * _segmentLength; // объём звена, м³
         float mass = Mathf.Max(0.001f, cableDensity * V);
@@ -215,17 +252,13 @@ public class UmbilicalCable : MonoBehaviour
             prev = _rovAnchor;
         }
 
+        _суставы = new ConfigurableJoint[segmentCount];
         for (int i = 0; i < segmentCount; i++)
         {
             var go = new GameObject($"UmbilicalSegment_{i}");
             go.transform.SetParent(transform, false);
-            // Раскладываем звенья РАВНОМЕРНО между дроном (startP) и базой (endP),
-            // а не по прямой фиксированной длины: иначе при длине троса больше
-            // расстояния между концами прямая перелетала бы за базу (шпиль вверх
-            // над кораблём). При такой раскладке лишняя длина уходит в провисание
-            // вниз под действием веса в воде, как и должно быть у кабеля.
-            go.transform.position = Vector3.Lerp(startP, endP, (i + 0.5f) / segmentCount);
-            go.transform.rotation = rot;
+            // Звено i лежит между стыками i и i+1 раскладки с провисом.
+            go.transform.SetPositionAndRotation(0.5f * (стыки[i] + стыки[i + 1]), ПоворотЗвена(стыки[i], стыки[i + 1]));
 
             var col = go.AddComponent<CapsuleCollider>();
             col.direction = 1;                       // вдоль локальной оси Y
@@ -245,14 +278,17 @@ public class UmbilicalCable : MonoBehaviour
             // Сустав крепит текущее звено к предыдущему телу (или к корпусу НПА
             // у первого звена). Локальная +Y капсулы направлена к базе, значит
             // конец, обращённый к предыдущему телу (в сторону НПА) — это −Y.
-            // autoConfigureConnectedAnchor сам вычислит точку стыка в системе
-            // координат предыдущего тела по текущему взаимному положению —
-            // звенья построены встык, поэтому стык считается корректно.
+            // Точки стыка задаются ЯВНО (конец предыдущего звена +Y), а не
+            // autoConfigureConnectedAnchor: так длина кабеля = число звеньев × длина
+            // звена при любой начальной раскладке, и её можно менять (лебёдка).
             var joint = go.AddComponent<ConfigurableJoint>();
             joint.connectedBody = prev;                 // у первого звена = верхний якорь (корпус НПА или кинематический якорь)
+            joint.autoConfigureConnectedAnchor = false;
             joint.anchor = new Vector3(0f, -_segmentLength * 0.5f, 0f); // конец звена в сторону НПА
-            joint.autoConfigureConnectedAnchor = true;
+            joint.connectedAnchor = i == 0 ? prev.transform.InverseTransformPoint(стыки[0])
+                                           : new Vector3(0f, _segmentLength * 0.5f, 0f);
             ConfigureJoint(joint);
+            _суставы[i] = joint;
 
             prev = rb;
         }
@@ -264,9 +300,11 @@ public class UmbilicalCable : MonoBehaviour
             _baseAnchor = MakeKinematicAnchor("UmbilicalBaseAnchor", endP);
             var tailJoint = _segments[segmentCount - 1].gameObject.AddComponent<ConfigurableJoint>();
             tailJoint.connectedBody = _baseAnchor;
+            tailJoint.autoConfigureConnectedAnchor = false;
             tailJoint.anchor = new Vector3(0f, _segmentLength * 0.5f, 0f);
-            tailJoint.autoConfigureConnectedAnchor = true;
+            tailJoint.connectedAnchor = _baseAnchor.transform.InverseTransformPoint(стыки[segmentCount]);
             ConfigureJoint(tailJoint);
+            _суставБазы = tailJoint;
         }
 
         // Отключаем взаимные столкновения звеньев между собой и с корпусом НПА —
@@ -311,6 +349,180 @@ public class UmbilicalCable : MonoBehaviour
             return h.point;
         }
         return from + Vector3.down * totalCableLength_m;
+    }
+
+    // Раскладка кабеля с провисом: стыки звеньев (segmentCount + 1 точек) от заделки a до
+    // базы b. Слабина уходит в «пузо» от прямой a→b — в сторону составляющей «вниз»,
+    // перпендикулярной этой прямой (у почти отвесного кабеля с судна пузо отходит вбок, как у
+    // настоящей цепной линии), но не ниже дна. Глубина пуза подбирается делением пополам так,
+    // чтобы длина ломаной равнялась длине кабеля; стыки ставятся на равных расстояниях вдоль неё.
+    // уложено — сколько кабеля легло: меньше длины, если кабель короче расстояния до судна
+    // (тогда он натянут по прямой) или пузо упёрлось в дно.
+    Vector3[] РаскладкаСПровисом(Vector3 a, Vector3 b, float длина, out float уложено)
+    {
+        const int M = 240;
+        Vector3 ab = b - a;
+        float хорда = ab.magnitude;
+        Vector3 ось = хорда > 1e-4f ? ab / хорда : Vector3.down;
+        Vector3 пузо = Vector3.down - Vector3.Dot(Vector3.down, ось) * ось;
+        пузо = пузо.sqrMagnitude > 1e-4f ? пузо.normalized : Vector3.right;
+        float сверху = Mathf.Max(a.y, b.y) + 2f;
+        float зазор = cableRadius_m + 0.05f;
+
+        // Дно под прямой a→b (для подбора пуза) — рейкасты один раз.
+        var дноПодХордой = new float[M + 1];
+        for (int k = 0; k <= M; k++) дноПодХордой[k] = ВысотаДнаПод(Vector3.Lerp(a, b, k / (float)M), сверху) + зазор;
+
+        var путь = new Vector3[M + 1];
+        float Путь(float h, bool дноТочно)
+        {
+            float s = 0f;
+            for (int k = 0; k <= M; k++)
+            {
+                float t = k / (float)M;
+                Vector3 p = Vector3.Lerp(a, b, t) + пузо * (4f * h * t * (1f - t));
+                float дно = дноТочно ? ВысотаДнаПод(p, сверху) + зазор : дноПодХордой[k];
+                if (k > 0 && k < M && p.y < дно) p.y = дно;
+                путь[k] = p;
+                if (k > 0) s += Vector3.Distance(путь[k - 1], p);
+            }
+            return s;
+        }
+
+        float h0 = 0f;
+        if (хорда < длина)
+        {
+            float hi = Mathf.Max(1f, длина);
+            for (int n = 0; n < 6 && Путь(hi, false) < длина; n++) hi *= 2f;
+            float lo = 0f;
+            for (int n = 0; n < 40; n++)
+            {
+                float mid = 0.5f * (lo + hi);
+                if (Путь(mid, false) < длина) lo = mid; else hi = mid;
+            }
+            h0 = 0.5f * (lo + hi);
+        }
+        уложено = Путь(h0, true);   // окончательно — с дном точно под каждой точкой
+
+        // Стыки на равных расстояниях вдоль ломаной.
+        int N = Mathf.Max(1, segmentCount);
+        var стыки = new Vector3[N + 1];
+        стыки[0] = путь[0]; стыки[N] = путь[M];
+        float шаг = уложено / N, пройдено = 0f;
+        int seg = 1;
+        for (int j = 1; j < N; j++)
+        {
+            float цель = шаг * j;
+            while (seg < M && пройдено + Vector3.Distance(путь[seg - 1], путь[seg]) < цель)
+            {
+                пройдено += Vector3.Distance(путь[seg - 1], путь[seg]);
+                seg++;
+            }
+            float кусок = Vector3.Distance(путь[seg - 1], путь[seg]);
+            стыки[j] = Vector3.Lerp(путь[seg - 1], путь[seg], кусок > 1e-6f ? (цель - пройдено) / кусок : 0f);
+        }
+        return стыки;
+    }
+
+    // Высота дна (или трубы, камня) под точкой: луч сверху вниз мимо самого НПА, своего
+    // кабеля и судна-базы. Нет ничего — минус бесконечность (провис не ограничен).
+    readonly RaycastHit[] _лучи = new RaycastHit[32];
+    float ВысотаДнаПод(Vector3 p, float сверху)
+    {
+        var начало = new Vector3(p.x, сверху, p.z);
+        int n = Physics.RaycastNonAlloc(начало, Vector3.down, _лучи, сверху - p.y + 2000f, ~0, QueryTriggerInteraction.Ignore);
+        float лучшая = float.PositiveInfinity, высота = float.NegativeInfinity;
+        Transform судно = baseTransform != null ? baseTransform.root : null;
+        for (int i = 0; i < n; i++)
+        {
+            var t = _лучи[i].collider.transform;
+            if ((rov != null && t.IsChildOf(rov)) || t.IsChildOf(transform) || (судно != null && t.IsChildOf(судно))) continue;
+            if (_лучи[i].distance < лучшая) { лучшая = _лучи[i].distance; высота = _лучи[i].point.y; }
+        }
+        return высота;
+    }
+
+    static Quaternion ПоворотЗвена(Vector3 отНПА, Vector3 кБазе)
+    {
+        Vector3 d = кБазе - отНПА;
+        return Quaternion.FromToRotation(Vector3.up, d.sqrMagnitude > 1e-8f ? d : Vector3.down);
+    }
+
+    // Длина звена = длина кабеля / число звеньев. Меняется лебёдкой: якоря суставов
+    // раздвигаются, капсула удлиняется, масса растёт (вес в воде и сопротивление берут
+    // _segmentLength сами). Шаг за такт — доли миллиметра, решатель этого не замечает.
+    void ЗадатьДлинуЗвена(float L)
+    {
+        _segmentLength = L;
+        float mass = Mathf.Max(0.001f, cableDensity * Mathf.PI * cableRadius_m * cableRadius_m * L);
+        for (int i = 0; i < _segments.Length; i++)
+        {
+            var s = _segments[i];
+            if (s == null) continue;
+            s.mass = mass;
+            if (s.TryGetComponent(out CapsuleCollider col)) col.height = L + cableRadius_m * 2f;
+            var j = _суставы != null ? _суставы[i] : null;
+            if (j == null) continue;
+            j.anchor = new Vector3(0f, -0.5f * L, 0f);
+            if (i > 0) j.connectedAnchor = new Vector3(0f, 0.5f * L, 0f);
+        }
+        if (_суставБазы != null) _суставБазы.anchor = new Vector3(0f, 0.5f * L, 0f);
+    }
+
+    // Лебёдка на судне — как её оператор: держит провис (длина ≥ запасПровиса × расстояние
+    // до аппарата) и травит сверх него, пока кабель натянут (снос течением, зацеп), но не
+    // больше 1,6 расстояния. Сама кабель не выбирает: лишний ляжет на дно, как в жизни.
+    bool _травит;
+    void Лебёдка(float dt)
+    {
+        if (!автоТравление || _segments == null || segmentCount <= 0) return;
+        float d = Vector3.Distance(AnchorOnRov(), BaseWorldPoint());
+        float нужно = d * запасПровиса;
+        if (Натяжение_Н > порогТравления_Н)
+            нужно = Mathf.Max(нужно, Mathf.Min(totalCableLength_m + 1f, d * 1.6f));
+        нужно = Mathf.Min(нужно, длинаНаБарабане_м);
+
+        bool травит = нужно > totalCableLength_m + 1e-3f;
+        if (травит != _травит)
+            Debug.Log(травит ? $"[Лебёдка] Травлю кабель: вытравлено {totalCableLength_m:F0} м"
+                             : $"[Лебёдка] Стоп: вытравлено {totalCableLength_m:F0} м из {длинаНаБарабане_м:F0} м");
+        _травит = травит;
+        if (!травит) return;
+        totalCableLength_m = Mathf.Min(нужно, totalCableLength_m + скоростьЛебёдки_мс * dt);
+        ЗадатьДлинуЗвена(totalCableLength_m / segmentCount);
+    }
+
+    // Защита от численного разлёта цепочки. Длинная цепь суставов в PhysX изредка
+    // «взрывается» (скомканный кабель на дне, удар о трубу): звенья улетают со скоростями
+    // в сотни м/с, а сила в суставе у заделки — миллиарды ньютонов. Настоящий кабель так
+    // не может; раньше это рвало кабель («обрыв») и швыряло аппарат на десятки метров.
+    // Заметив разлёт, кабель перекладываем заново с провисом, аппарат не трогаем.
+    bool ЦепочкаРазлетелась()
+    {
+        foreach (var s in _segments)
+            if (s != null && !(s.linearVelocity.sqrMagnitude < 400f)) return true;   // > 20 м/с или NaN
+        return false;
+    }
+
+    float _времяПерекладки = -999f;
+    void ПереложитьКабель()
+    {
+        Vector3 a = AnchorOnRov(), b = _baseAnchor != null ? _baseAnchor.position : BaseWorldPoint();
+        var стыки = РаскладкаСПровисом(a, b, totalCableLength_m, out _);
+        for (int i = 0; i < _segments.Length; i++)
+        {
+            var s = _segments[i];
+            if (s == null) continue;
+            Vector3 p = 0.5f * (стыки[i] + стыки[i + 1]);
+            Quaternion q = ПоворотЗвена(стыки[i], стыки[i + 1]);
+            s.transform.SetPositionAndRotation(p, q);
+            s.position = p; s.rotation = q;
+            s.linearVelocity = Vector3.zero; s.angularVelocity = Vector3.zero;
+        }
+        _натяжение = Vector3.zero;
+        if (Time.time - _времяПерекладки > 5f)
+            Debug.LogWarning("[Кабель] Численный разлёт цепочки звеньев — кабель переложен заново, аппарат не дёрнут.");
+        _времяПерекладки = Time.time;
     }
 
     Rigidbody MakeKinematicAnchor(string anchorName, Vector3 worldPos)
@@ -373,6 +585,8 @@ public class UmbilicalCable : MonoBehaviour
         if (_baseAnchor != null)
             _baseAnchor.MovePosition(BaseWorldPoint());
 
+        if (ЦепочкаРазлетелась()) ПереложитьКабель();
+        Лебёдка(Time.fixedDeltaTime);
         ApplyUnderwaterForces();
         ПриложитьНатяжение();
     }
@@ -390,11 +604,20 @@ public class UmbilicalCable : MonoBehaviour
         if (j == null) return;
 
         Vector3 F = -j.currentForce;
+        // Сила в суставе больше 20 кН (в 8 раз выше разрывного усилия) или не число — это
+        // разлёт решателя, а не кабель: на аппарат не передаём, кабель перекладываем.
+        if (!(F.sqrMagnitude < 4e8f)) { ПереложитьКабель(); return; }
         float dt = Time.fixedDeltaTime;
         _натяжение = Vector3.Lerp(_натяжение, F, 1f - Mathf.Exp(-dt / 0.2f));
         float разгон = Mathf.Clamp01((Time.time - _времяСтарта) / 2f);
         Vector3 Fк = Vector3.ClampMagnitude(_натяжение, предельНатяжения_Н) * разгон;
-        _rovBody.AddForceAtPosition(Fк, AnchorOnRov(), ForceMode.Force);
+        Vector3 точка = AnchorOnRov();
+        if (натяжениеНаУровнеЦентраМасс)
+        {
+            Vector3 верх = _rovBody.transform.up;
+            точка += верх * Vector3.Dot(_rovBody.worldCenterOfMass - точка, верх);
+        }
+        _rovBody.AddForceAtPosition(Fк, точка, ForceMode.Force);
 
         bool натянут = Натяжение_Н > порогПредупреждения_Н;
         if (натянут && !_предупреждён) Debug.Log($"[Кабель] Натянут: {Натяжение_Н:F0} Н — потравить кабель или вернуться к базе");

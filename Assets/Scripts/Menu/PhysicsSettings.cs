@@ -44,7 +44,7 @@ public static class PhysicsSettings
     const float ОпорнаяСолёность = 35f, ОпорнаяТемпература = 6f;
     const float ОпорнаяПлотность = 1025f, ОпорнаяСкоростьЗвука = 1500f;
 
-    public static readonly Параметр Комплектация = new Параметр { Ключ = "m350_kit",     Название = "Комплектация «Марлин-350»", Мин = 0f, Макс = 2f, Шаг = 1f, ПоУмолчанию = 2f, Варианты = MarlinSpec.НазванияКомплектаций };
+    public static readonly Параметр Комплектация = new Параметр { Ключ = "m350_kit2",    Название = "Комплектация «Марлин-350»", Мин = 0f, Макс = 1f, Шаг = 1f, ПоУмолчанию = 0f, Варианты = MarlinSpec.НазванияКомплектаций };
     public static readonly Параметр Тяга         = new Параметр { Ключ = "m350_thrust",  Название = "Тяга движителей (износ)",  Ед = "%", Формат = "0",       Мин = 60f, Макс = 100f, Шаг = 5f, ПоУмолчанию = 100f };
     public static readonly Параметр Плавучесть   = new Параметр { Ключ = "m350_buoy",    Название = "Запас плавучести",        Ед = "Н", Формат = "+0;−0;0", Мин = -10f, Макс = 20f, Шаг = 1f, ПоУмолчанию = 5f };
     public static readonly Параметр Солёность    = new Параметр { Ключ = "phys_salinity", Название = "Солёность воды",         Ед = "‰",  Формат = "0", Мин = 0f, Макс = 40f,  Шаг = 5f,  ПоУмолчанию = 35f };
@@ -56,7 +56,7 @@ public static class PhysicsSettings
     public const int ПараметровАппарата = 3;
 
     public static MarlinSpec.Комплектация ТекущаяКомплектация =>
-        (MarlinSpec.Комплектация)Mathf.Clamp(Mathf.RoundToInt((_действующие ?? Текущие())[0]), 0, 2);
+        (MarlinSpec.Комплектация)Mathf.Clamp(Mathf.RoundToInt((_действующие ?? Текущие())[0]), 0, 1);
     public static bool ЛагУстановлен => MarlinSpec.ЕстьЛаг(ТекущаяКомплектация);
 
     public static void СброситьВсё()
@@ -123,7 +123,7 @@ public static class PhysicsSettings
         if (снимок != null && снимок.Length == v.Length)   // снимок прежнего формата (до «Марлина») — не наш
             for (int i = 0; i < v.Length; i++) v[i] = Mathf.Clamp(снимок[i], Все[i].Мин, Все[i].Макс);
         _действующие = v;
-        var кмп = (MarlinSpec.Комплектация)Mathf.Clamp(Mathf.RoundToInt(v[0]), 0, 2);
+        var кмп = (MarlinSpec.Комплектация)Mathf.Clamp(Mathf.RoundToInt(v[0]), 0, 1);
         float тяга = v[1] / 100f, запас = v[2], S = v[3], T = v[4], течение = v[5] / 100f;
         float масса = MarlinSpec.Масса(кмп);
         float ρ = ПлотностьПри(S, T), c = СкоростьЗвукаПри(S, T);

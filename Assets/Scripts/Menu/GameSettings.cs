@@ -9,7 +9,7 @@ public static class GameSettings
     public enum Платформа { Quest = 0, ПКVR = 1 }
 
     const string Kгромкость = "vol_master", Kинтерфейс = "vol_ui", Kплатформа = "platform",
-                 Kокружение = "vol_ambient", Kдвигатели = "vol_motors";
+                 Kокружение = "vol_ambient", Kдвигатели = "vol_motors", Kпомощь = "pilot_assist";
 
     public static float ГромкостьОкружения
     {
@@ -46,6 +46,14 @@ public static class GameSettings
             return Application.platform == RuntimePlatform.Android ? Платформа.Quest : Платформа.ПКVR;
         }
         set { PlayerPrefs.SetInt(Kплатформа, (int)value); PlayerPrefs.Save(); }
+    }
+
+    // Помощь пилоту (RovPilotAssist): рычаг в нейтрали — аппарат сам держит глубину и курс.
+    // Выкл — чистые рычаги. Действует сразу, в том числе в идущей миссии.
+    public static bool ПомощьПилоту
+    {
+        get => PlayerPrefs.GetInt(Kпомощь, 1) == 1;
+        set { PlayerPrefs.SetInt(Kпомощь, value ? 1 : 0); PlayerPrefs.Save(); }
     }
 
     public static void Применить() => AudioListener.volume = Громкость;

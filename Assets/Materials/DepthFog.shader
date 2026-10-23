@@ -4,6 +4,7 @@ Shader "Custom/DepthFog"
     {
         _FogColor ("Fog Color", Color) = (0.0588, 0.1647, 0.2275, 1)
         _FogDensity ("Fog Density", Range(0, 1)) = 0.15
+        _ClearRadius ("Clear Radius (m)", Range(0, 20)) = 0
     }
     SubShader
     {
@@ -24,6 +25,7 @@ Shader "Custom/DepthFog"
 
             float4 _FogColor;
             float _FogDensity;
+            float _ClearRadius;   // ближе этого — мути нет, дальше нарастает
 
             // Заполняются скриптом SpotlightFogClear каждый кадр — луч фонаря
             // "выедает" туман в своём конусе, а не просто светит сквозь него.
@@ -65,7 +67,8 @@ Shader "Custom/DepthFog"
                 // Эффект целиком живёт в этом Renderer Feature, который
                 // подключён только к одному Renderer'у URP — другие камеры,
                 // использующие другой Renderer, физически не могут его получить.
-                float fogFactor = saturate(1.0 - exp(-eyeDepth * _FogDensity));
+                // Ближе _ClearRadius воды как будто нет; дальше муть нарастает плавно.
+                float fogFactor = saturate(1.0 - exp(-max(0.0, eyeDepth - _ClearRadius) * _FogDensity));
 
                 // Точка попадания луча взгляда в реальную поверхность (если её нет —
                 // эта точка окажется далеко, на дальней плоскости/небе).

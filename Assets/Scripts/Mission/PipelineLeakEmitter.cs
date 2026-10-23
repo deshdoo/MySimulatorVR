@@ -61,6 +61,14 @@ public class PipelineLeakEmitter : MonoBehaviour
     private static Material _matКэш;
 
     private ParticleSystem _ps;
+    private ParticleSystemRenderer _рендер;
+    private MaterialPropertyBlock _блок;
+
+    [Header("Гаснут вдали, как всё в мути")]
+    [Tooltip("Ближе этого пузыри видны полностью, м (как Clear Radius у мути M_FOG).")]
+    public float ВидныДо_м = 3.2f;
+    [Tooltip("Как быстро гаснут дальше, 1/м (как Fog Density у M_FOG; пузыри мелкие — чуть быстрее).")]
+    public float Затухание = 0.2f;
     private PipelineDefect _defect;
     private bool _пузырит;
     private bool _погашено;
@@ -70,9 +78,11 @@ public class PipelineLeakEmitter : MonoBehaviour
         _defect = GetComponentInChildren<PipelineDefect>();
 
         // Пузыри осмысленны только для течи/трещины. Коррозия и провис — без пузырей.
+        // Удар якоря на магистрали смял и сталь — газ идёт (как на Balticconnector, 2023).
         if (ТолькоУтечкиИТрещины && _defect != null &&
             _defect.Тип != PipelineDefect.ТипДефекта.Утечка &&
-            _defect.Тип != PipelineDefect.ТипДефекта.Трещина)
+            _defect.Тип != PipelineDefect.ТипДефекта.Трещина &&
+            _defect.Тип != PipelineDefect.ТипДефекта.СледЯкоря)
         {
             enabled = false;
             return;
@@ -83,6 +93,23 @@ public class PipelineLeakEmitter : MonoBehaviour
         // Если ждём обнаружения (и дефект реально есть) — стартуем выключенными.
         bool сразу = !(ТолькоПослеОбнаружения && _defect != null);
         Пузырить(сразу);
+    }
+
+    // Муть (DepthFog) считается по глубине сцены, а прозрачные пузыри глубину не пишут —
+    // без этого они рисовались поверх мути и были ярко видны издалека. Гасим их сами
+    // по расстоянию до камеры аппарата той же формулой, что у мути.
+    void LateUpdate()
+    {
+        if (_рендер == null) return;
+        var cam = RovCameraRig.Бортовая();
+        if (cam == null) cam = Camera.main;
+        if (cam == null) return;
+        float d = Vector3.Distance(cam.transform.position, transform.position);
+        float видно = Mathf.Exp(-Mathf.Max(0f, d - ВидныДо_м) * Затухание);
+        _блок ??= new MaterialPropertyBlock();
+        _рендер.GetPropertyBlock(_блок);
+        _блок.SetColor("_BaseColor", new Color(1f, 1f, 1f, видно));
+        _рендер.SetPropertyBlock(_блок);
     }
 
     void Update()
@@ -210,6 +237,7 @@ public class PipelineLeakEmitter : MonoBehaviour
         renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         renderer.receiveShadows = false;
         renderer.material = МатериалПузырей != null ? МатериалПузырей : МатериалПоУмолчанию();
+        _рендер = renderer;
     }
 
     // Прозрачный URP-материал с процедурной текстурой мягкого пузыря. Кэшируется —

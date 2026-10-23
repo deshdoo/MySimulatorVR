@@ -83,6 +83,8 @@ public class PipelineDefectSpawner : MonoBehaviour
             Debug.LogWarning("[PipelineDefectSpawner] Не задана труба (с коллайдерами) и нет ≥2 точек трассы — спавн пропущен.");
             return;
         }
+        // Магистраль в бетоне ставит повреждения сама — как часть формы трубы.
+        if (Труба != null && Труба.GetComponent<МагистральныйТрубопровод>() != null) return;
         if (!ЕстьПрефаб())
         {
             Debug.LogWarning("[PipelineDefectSpawner] Не заданы префабы дефектов (список пуст или только None) — спавн пропущен.");
@@ -190,12 +192,17 @@ public class PipelineDefectSpawner : MonoBehaviour
     // поставить сохранённые (те же места, ориентация и тип).
     public void УдалитьВсеДефекты()
     {
+        if (Труба != null && Труба.TryGetComponent(out МагистральныйТрубопровод маг)) маг.СброситьПовреждения();
         foreach (var d in FindObjectsByType<PipelineDefect>(FindObjectsSortMode.None))
             if (d != null) DestroyImmediate(d.gameObject);
     }
 
     public PipelineDefect Разместить(PipelineDefect.ТипДефекта тип, Vector3 место, Quaternion пов)
     {
+        // На магистрали повреждения — часть формы трубы: она перестраивает себя сама.
+        if (Труба != null && Труба.TryGetComponent(out МагистральныйТрубопровод маг))
+            return маг.ВосстановитьПовреждение(тип, место);
+
         GameObject префаб = null;
         if (ПрефабыДефектов != null)
             foreach (var p in ПрефабыДефектов)
@@ -221,6 +228,12 @@ public class PipelineDefectSpawner : MonoBehaviour
     public bool ГеометрияТрубы(out Vector3 начало, out Vector3 конец, out float радиус)
     {
         начало = конец = Vector3.zero; радиус = 0f;
+        // Магистраль знает свою трассу точно: открытая часть без концов в траншее.
+        if (Труба != null && Труба.TryGetComponent(out МагистральныйТрубопровод маг) && маг.Построен)
+        {
+            начало = маг.НачалоОсмотра; конец = маг.КонецОсмотра; радиус = маг.Радиус;
+            return true;
+        }
         if (_путь != null && _путь.Length >= 2)
         {
             начало = _путь[0]; конец = _путь[_путь.Length - 1]; радиус = _радиус;
