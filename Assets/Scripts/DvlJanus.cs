@@ -62,8 +62,13 @@ public static class DvlJanus
     public static readonly RaycastHit[] Буфер = new RaycastHit[64];
 
     public static bool ЛучДоДна(Transform корпус, Rigidbody свой, Vector3 o, Vector3 d, float макс, out float R)
+        => ЛучДоДна(корпус, свой, o, d, макс, out R, out _);
+
+    // То же, плюс во что попал луч: грунт (TerrainCollider), труба, камень.
+    public static bool ЛучДоДна(Transform корпус, Rigidbody свой, Vector3 o, Vector3 d, float макс, out float R, out Collider что)
     {
         R = макс;
+        что = null;
         bool есть = false;
         int n = Physics.RaycastNonAlloc(o, d, Буфер, макс, ~0, QueryTriggerInteraction.Ignore);
         for (int i = 0; i < n; i++)
@@ -72,7 +77,7 @@ public static class DvlJanus
             if (h.collider.transform.IsChildOf(корпус)) continue;
             if (h.rigidbody != null && h.rigidbody != свой && !h.rigidbody.isKinematic) continue;   // подвижные тела
             if (h.collider.GetComponentInParent<UmbilicalCable>() != null) continue;              // свой кабель (звенья и якоря)
-            if (h.distance < R) { R = h.distance; есть = true; }
+            if (h.distance < R) { R = h.distance; что = h.collider; есть = true; }
         }
         return есть;
     }

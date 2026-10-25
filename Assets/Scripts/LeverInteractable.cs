@@ -105,6 +105,8 @@ public class LeverInteractable : MonoBehaviour
         }
         _interactable.selectEntered.AddListener(OnSelectEntered);
         _interactable.selectExited.AddListener(OnSelectExited);
+        НаведениеПальцем.Добавить(_interactable);   // руками: подсветка, когда палец ближе 10 см
+        if (!Все.Contains(this)) Все.Add(this);
     }
 
     void OnDisable()
@@ -115,7 +117,14 @@ public class LeverInteractable : MonoBehaviour
             _interactable.selectExited.RemoveListener(OnSelectExited);
         }
         _grabHand = null;
+        _захватил = null;
+        Все.Remove(this);
     }
+
+    // Рычаги сцены, кто держит каждый и его коллайдеры — для «кисть на рукоятке» (УпорРук).
+    public static readonly System.Collections.Generic.List<LeverInteractable> Все = new();
+    public IXRInteractor Держит => _захватил;
+    public XRBaseInteractable Интерактабл => _interactable;
 
     void OnSelectEntered(SelectEnterEventArgs args)
     {
@@ -124,6 +133,8 @@ public class LeverInteractable : MonoBehaviour
         // (щипок руки или grip/курок контроллера). Выключается галкой игнорироватьPoke.
         if (игнорироватьPoke && args.interactorObject is XRPokeInteractor) return;
         _grabHand = args.interactorObject.transform;
+        _захватил = args.interactorObject;
+        Вибро.Импульс(_захватил, Вибро.Захват);
         _grabStartHandPos = _grabHand.position;
         _grabStartAngle = _angle;
         _grabStartAngleLat = _angleLat;
@@ -151,12 +162,27 @@ public class LeverInteractable : MonoBehaviour
     void OnSelectExited(SelectExitEventArgs args)
     {
         _grabHand = null;
+        _захватил = null;
+    }
+
+    // Отдача контроллера: упёрся в крайнее положение — сильный толчок, прошёл нейтраль — лёгкий щелчок.
+    IXRInteractor _захватил;
+    bool _былНаУпоре, _былВНейтрали = true;
+
+    void ОтдачаРычага()
+    {
+        if (_захватил == null) { _былНаУпоре = false; _былВНейтрали = Mathf.Abs(_angle) <= neutralDeadzoneDeg; return; }
+        bool наУпоре = _angle <= minAngle + 0.5f || _angle >= maxAngle - 0.5f;
+        bool вНейтрали = Mathf.Abs(_angle) <= neutralDeadzoneDeg;
+        if (наУпоре && !_былНаУпоре) Вибро.Импульс(_захватил, Вибро.Упор, 0.06f);
+        if (вНейтрали && !_былВНейтрали) Вибро.Импульс(_захватил, Вибро.Нейтраль);
+        _былНаУпоре = наУпоре; _былВНейтрали = вНейтрали;
     }
 
     void Update()
     {
         bool hovered = _interactable != null && _interactable.isHovered;
-        ApplyHighlight(hovered || _grabHand != null);
+        ApplyHighlight(hovered || _grabHand != null || НаведениеПальцем.Наведён(_interactable));
 
         if (axis == LeverAxis.Planar) { ОбновитьПланар(hovered); return; }
 
@@ -209,6 +235,7 @@ public class LeverInteractable : MonoBehaviour
         transform.localEulerAngles = axis == LeverAxis.Yaw
             ? new Vector3(-_angle, 0f, 0f)
             : new Vector3(0f, 0f, -_angle);
+        ОтдачаРычага();
 
         float normalized = Mathf.InverseLerp(minAngle, maxAngle, _angle) * 2f - 1f;
         if (invert) normalized *= -1f;

@@ -36,15 +36,21 @@ using UnityEngine.SceneManagement;
 [DisallowMultipleComponent]
 public class RovSiltStirring : MonoBehaviour
 {
+    // Сколько клубов мути сейчас в воде (для счётчика нагрузки FrameHitchLogger).
+    public static int ЖивыхКлубов { get; private set; }
+
     [Header("Когда поднимается муть")]
     [Tooltip("Выше этой высоты над дном струя до грунта не достаёт, м.")]
-    public float ВысотаНачала_м = 1.0f;
+    public float ВысотаНачала_м = 0.8f;
     [Tooltip("На этой высоте и ниже взмучивание максимальное, м.")]
-    public float ВысотаМакс_м = 0.3f;
+    public float ВысотаМакс_м = 0.2f;
     [Tooltip("Вклад горизонтальных движителей относительно вертикальных (струя идёт вскользь по дну).")]
-    [Range(0f, 1f)] public float ВесГоризонтальной = 0.45f;
+    [Range(0f, 1f)] public float ВесГоризонтальной = 0.3f;
     [Tooltip("Клубов в секунду при максимальной тяге у самого дна.")]
-    public float МаксКлубовВСекунду = 22f;
+    public float МаксКлубовВСекунду = 12f;
+    [Tooltip("Над трубой, камнями и прочим не-грунтом — доля от взмучивания над грунтом: на бетоне " +
+             "лишь тонкий налёт ила. Труба лежит на дне, и вдоль неё аппарат часто идёт низко над ней.")]
+    [Range(0f, 1f)] public float НадТвёрдым = 0.1f;
 
     [Header("Облако")]
     [Tooltip("Скорость оседания ила, м/с (мелкий ил 0.005–0.03).")]
@@ -62,7 +68,7 @@ public class RovSiltStirring : MonoBehaviour
     [Tooltip("Радиус сферы вокруг камеры, в которой считается плотность мути, м.")]
     public float РадиусОценки_м = 2.0f;
     [Tooltip("Чувствительность: меньше — быстрее «слепнет».")]
-    public float НасыщениеМутности = 1.2f;
+    public float НасыщениеМутности = 1.8f;
     [Tooltip("За сколько секунд вода мутнеет, когда облако накрыло камеру.")]
     public float Помутнение_с = 1.0f;
     [Tooltip("За сколько секунд проясняется, когда облако ушло.")]
@@ -241,8 +247,9 @@ public class RovSiltStirring : MonoBehaviour
     void Испускать(float dt)
     {
         // Высота над дном — тем же фильтрованным лучом, что у эхолота (не цепляем свой кабель).
-        if (!DvlJanus.ЛучДоДна(transform, _rb, transform.position, Vector3.down, ВысотаНачала_м + 0.5f, out float h)) return;
+        if (!DvlJanus.ЛучДоДна(transform, _rb, transform.position, Vector3.down, ВысотаНачала_м + 0.5f, out float h, out Collider подНами)) return;
         float поВысоте = Mathf.Clamp01((ВысотаНачала_м - h) / Mathf.Max(0.01f, ВысотаНачала_м - ВысотаМакс_м));
+        if (!(подНами is TerrainCollider)) поВысоте *= НадТвёрдым;   // под нами труба или камень, а не ил
         if (поВысоте <= 0f) return;
 
         float гориз = Mathf.Max(Mathf.Abs(DroneInput.forward), Mathf.Abs(DroneInput.lateral), Mathf.Abs(DroneInput.yaw));
@@ -283,6 +290,7 @@ public class RovSiltStirring : MonoBehaviour
     float ПереноситьИОценить(float dt)
     {
         int n = _ps.particleCount;
+        ЖивыхКлубов = n;
         if (n == 0) return 0f;
         if (_буфер.Length < _ps.main.maxParticles) _буфер = new ParticleSystem.Particle[_ps.main.maxParticles];
         n = _ps.GetParticles(_буфер);

@@ -1,14 +1,13 @@
 using UnityEngine;
 
-// Настройки игрока (PlayerPrefs): громкость по категориям и выбранная система.
-// Система влияет только на переназначение в меню «Управление»: гарнитура
-// автономно (APK) — переназначаются кнопки контроллеров; ПК VR (SteamVR / Quest
-// Link, в т.ч. XR-эмулятор в редакторе) — клавиши клавиатуры.
+// Настройки игрока (PlayerPrefs): громкость по категориям и чем управлять — руками
+// или контроллерами (РежимВводаРига переключает риг XR Origin Hands).
 public static class GameSettings
 {
-    public enum Платформа { Quest = 0, ПКVR = 1 }
+    // Числа — как сохранено в PlayerPrefs (0 был «Авто», теперь читается как «Контроллеры»).
+    public enum Ввод { Контроллеры = 1, Руки = 2 }
 
-    const string Kгромкость = "vol_master", Kинтерфейс = "vol_ui", Kплатформа = "platform",
+    const string Kгромкость = "vol_master", Kинтерфейс = "vol_ui", Kввод = "input_mode",
                  Kокружение = "vol_ambient", Kдвигатели = "vol_motors", Kпомощь = "pilot_assist";
 
     public static float ГромкостьОкружения
@@ -35,17 +34,10 @@ public static class GameSettings
         set { PlayerPrefs.SetFloat(Kинтерфейс, Mathf.Clamp01(value)); PlayerPrefs.Save(); }
     }
 
-    // По умолчанию — угадываем по тому, где запущены: APK на Android = гарнитура
-    // автономно, иначе ПК VR (эмулятор в редакторе — это тот же ПК VR).
-    public static Платформа ТекущаяПлатформа
+    public static Ввод РежимВвода
     {
-        get
-        {
-            if (PlayerPrefs.HasKey(Kплатформа))
-                return PlayerPrefs.GetInt(Kплатформа) == 0 ? Платформа.Quest : Платформа.ПКVR;
-            return Application.platform == RuntimePlatform.Android ? Платформа.Quest : Платформа.ПКVR;
-        }
-        set { PlayerPrefs.SetInt(Kплатформа, (int)value); PlayerPrefs.Save(); }
+        get => PlayerPrefs.GetInt(Kввод, (int)Ввод.Контроллеры) == (int)Ввод.Руки ? Ввод.Руки : Ввод.Контроллеры;
+        set { PlayerPrefs.SetInt(Kввод, (int)value); PlayerPrefs.Save(); РежимВводаРига.Применить(); }
     }
 
     // Помощь пилоту (RovPilotAssist): рычаг в нейтрали — аппарат сам держит глубину и курс.
@@ -60,6 +52,17 @@ public static class GameSettings
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void ПриЗапуске() => Применить();
+
+    // Числа на экранах — с десятичной точкой при любом языке системы: в шрифте окон нет
+    // запятой, она бралась из запасного шрифта и «прыгала». Файлы для Excel (телеметрия,
+    // испытания) задают русский формат явно и не меняются.
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+    static void ТочкаВЧислах()
+    {
+        var c = System.Globalization.CultureInfo.InvariantCulture;
+        System.Globalization.CultureInfo.DefaultThreadCurrentCulture = c;
+        System.Globalization.CultureInfo.CurrentCulture = c;
+    }
 }
 
 // Короткий щелчок интерфейса — генерируется кодом (без аудиофайлов), громкость —

@@ -35,7 +35,7 @@ public class SonarInstrumentVisualizer : MonoBehaviour, IДемонстраци�
     public int Порядок => 20;
     public bool Показано => Показывать;
     public string Состояние => "скорость " +
-                               (_множитель > 0.9f ? "1×" : _множитель > 0.4f ? "½×" : "¼×") + (_пауза ? " · пауза" : "");
+                               (_множитель > 0.9f ? "1×" : _множитель > 0.4f ? "½×" : "¼×") + (_пауза ? " — пауза" : "");
     public void СменитьВид() { if (Показывать) ВидСбоку(!_видСбоку); }
     public void Пауза() => _пауза = !_пауза;
     public void СменитьСкорость() => _множитель = _множитель > 0.9f ? 0.5f : _множитель > 0.4f ? 0.25f : 1f;
@@ -251,8 +251,8 @@ public class SonarInstrumentVisualizer : MonoBehaviour, IДемонстраци�
             "Звук отражается: металл — сильно, грунт — слабо, за целью тень",
             "Эхо вернулось: дальность r = c·t/2, сила → яркость точки на экране");
 
-        sb.Append("\nШкала ").Append(п.Дальность_м.ToString("F0")).Append(" м · шаг ")
-          .Append((п.ВремяШага_с * 1000f).ToString("F0")).Append(" мс · оборот ").Append(п.ВремяОборота_с.ToString("F0")).Append(" с\n");
+        sb.Append("\nШкала ").Append(п.Дальность_м.ToString("F0")).Append(" м — шаг ")
+          .Append((п.ВремяШага_с * 1000f).ToString("F0")).Append(" мс — оборот ").Append(п.ВремяОборота_с.ToString("F0")).Append(" с\n");
         sb.Append("<color=#aab6bf>Чем больше шкала — тем дольше ждать эхо и медленнее оборот</color>\n");
 
         int сЭхом = 0; for (int i = 0; i < _отр.Length; i++) if (_отр[i].есть) сЭхом++;

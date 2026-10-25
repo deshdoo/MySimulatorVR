@@ -43,7 +43,7 @@ public class DopplerInstrumentsVisualizer : MonoBehaviour, IДемонстрац
     public int Порядок => 10;
     public bool Показано => Показывать;
     public string Состояние => "скорость " +
-                               (_множитель > 0.9f ? "1×" : _множитель > 0.4f ? "½×" : "¼×") + (_пауза ? " · пауза" : "");
+                               (_множитель > 0.9f ? "1×" : _множитель > 0.4f ? "½×" : "¼×") + (_пауза ? " — пауза" : "");
     public void СменитьВид() { if (Показывать) ВидСбоку(!_видСбоку); }
     public void Пауза() => _пауза = !_пауза;
     public void СменитьСкорость() => _множитель = _множитель > 0.9f ? 0.5f : _множитель > 0.4f ? 0.25f : 1f;
@@ -78,6 +78,8 @@ public class DopplerInstrumentsVisualizer : MonoBehaviour, IДемонстрац
     public float ДоляШириныПанели = 0.36f;
     [Tooltip("Размер подписей у объектов (на расстоянии 1 м от камеры)")]
     public float РазмерПодписей = 0.3f;
+    [Tooltip("Луч без эха от дна рисуется не дальше этого, м: иначе камера отъезжает на всю дальность прибора и аппарат теряется")]
+    public float ДлинаЛучаБезДна_м = 6f;
 
     // --- собственные часы анимации (пауза/замедление) ---
     private float _время;
@@ -117,6 +119,8 @@ public class DopplerInstrumentsVisualizer : MonoBehaviour, IДемонстрац
     private readonly float[] _дальность = new float[4];
     private readonly bool[] _захват = new bool[4];
     private float _дальностьПинга;
+    private float _м = 1f;   // масштаб толщины линий и волн: камера дальше — линии толще, на экране не теряются
+    private readonly List<(LineRenderer lr, float толщина)> _линии = new List<(LineRenderer, float)>();
 
     void Awake()
     {
@@ -184,24 +188,26 @@ public class DopplerInstrumentsVisualizer : MonoBehaviour, IДемонстрац
             for (int i = 0; i < 4; i++)
             {
                 _захват[i] = д.ЭхоОтДна[i];
-                _дальность[i] = д.Дальность_м[i];
+                // Без эха — луч короткий (дальше рисовать нечего), и пинг не ждёт эха с 50 м.
+                _дальность[i] = _захват[i] ? д.Дальность_м[i] : Mathf.Min(д.Дальность_м[i], Mathf.Max(ДлинаЛучаБезДна_м, W * 1.5f));
                 _дальностьПинга = Mathf.Max(_дальностьПинга, _дальность[i]);
             }
         }
 
         float r = c * t;   // где сейчас фронт импульса
+        Масштабировать();
         for (int i = 0; i < 4; i++)
         {
             Vector3 d = тр.TransformDirection(DvlJanus.Луч(i, θ, true));
             float R = _дальность[i];
-            Линия(_луч[i], o, o + d * R, new Color(0.35f, 0.65f, 1f, _захват[i] ? 0.35f : 0.15f));
+            Линия(_луч[i], o, o + d * R, new Color(0.35f, 0.65f, 1f, _захват[i] ? 0.55f : 0.25f));
 
             // Скорости вдоль лучей — ИЗ ДАТЧИКА (последнее измерение): ими окрашено эхо.
             float vrДно = д.ЭхоОтДна[i] ? д.РадиальнаяДно[i] : 0f;
             float vrВода = д.РадиальнаяВода[i];
 
             // 1. Импульс вниз.
-            if (r < R) Волна(_импульс[i], o, d, r, ДлинаВолныВизуально, new Color(0.75f, 0.9f, 1f, 1f));
+            if (r < R) Волна(_импульс[i], o, d, r, ДлинаВолныВизуально * _м, new Color(0.75f, 0.9f, 1f, 1f));
             else _импульс[i].enabled = false;
 
             // 2. Слабое эхо от воды — приходит первым (ячейка ближе дна).
@@ -224,7 +230,7 @@ public class DopplerInstrumentsVisualizer : MonoBehaviour, IДемонстрац
             if (_захват[i] && r >= R)
             {
                 float возраст = (r - R) / c;
-                Окружность(_пятно[i], o + d * R, Vector3.up, 0.25f + возраст * 0.8f, new Color(0.6f, 0.85f, 1f, Mathf.Clamp01(1f - возраст / 1.2f)));
+                Окружность(_пятно[i], o + d * R, Vector3.up, (0.25f + возраст * 0.8f) * _м, new Color(0.6f, 0.85f, 1f, Mathf.Clamp01(1f - возраст / 1.2f)));
             }
             else _пятно[i].enabled = false;
 
@@ -256,11 +262,13 @@ public class DopplerInstrumentsVisualizer : MonoBehaviour, IДемонстрац
         for (int i = 0; i < 4; i++) if (_захват[i]) { лучДна = i; break; }
         Vector3 dДна = лучДна >= 0 ? тр.TransformDirection(DvlJanus.Луч(лучДна, θ, true)) : Vector3.down;
         if (лучДна >= 0 && r >= _дальность[лучДна])
-            Метка(o + dДна * _дальность[лучДна] + Vector3.up * 0.4f, "отражение от дна", new Color(0.7f, 0.88f, 1f));
+            Метка(o + dДна * _дальность[лучДна] + Vector3.up * 0.4f * _м, "отражение от дна", new Color(0.7f, 0.88f, 1f));
         else if (r < _дальностьПинга)
             Метка(o + Vector3.down * r * Mathf.Cos(θ * Mathf.Deg2Rad), "импульс", new Color(0.7f, 0.88f, 1f));
         Метка(o + Vector3.down * W * Mathf.Cos(θ * Mathf.Deg2Rad), "эхо от воды (" + W.ToString("F0") + " м)", new Color(0.55f, 0.8f, 1f));
-        Метка(верх + Vector3.up * 0.9f, "скорость и течение", Color.white);
+        if (д.ЗахватДна || д.ЕстьВода) Метка(верх + Vector3.up * 0.9f, "скорость и течение", Color.white);
+        for (int i = 0; i < 4; i++)
+            if (!_захват[i]) { Метка(o + тр.TransformDirection(DvlJanus.Луч(i, θ, true)) * _дальность[i], "дна не видно", new Color(1f, 0.55f, 0.5f)); break; }
         ЗакончитьМетки();
 
         if (Time.unscaledTime >= _следТекст)
@@ -278,6 +286,14 @@ public class DopplerInstrumentsVisualizer : MonoBehaviour, IДемонстрац
         _кольцоВоды.enabled = _стрелкаДно.enabled = _стрелкаВода.enabled = _стрелкаТечение.enabled = false;
     }
 
+    // Толщина линий растёт с расстоянием камеры наблюдения: при отъезде на 20–30 м
+    // линии в 2–5 см превращались в нитки, и на мониторе был виден только аппарат.
+    void Масштабировать()
+    {
+        _м = _видСбоку && _кадрГотов ? Mathf.Clamp(_D / 8f, 1f, 4f) : 1f;
+        foreach (var (lr, толщина) in _линии) lr.widthMultiplier = толщина * _м;
+    }
+
     // Текущий шаг просто загорается жёлтым, остальные — тускло.
     static void Шаги(StringBuilder sb, int активный, params string[] шаги)
     {
@@ -285,57 +301,75 @@ public class DopplerInstrumentsVisualizer : MonoBehaviour, IДемонстрац
             sb.Append(i == активный ? "<color=#ffd75e>" : "<color=#aab6bf>").Append(i + 1).Append(". ").Append(шаги[i]).Append("</color>\n");
     }
 
+    // Текст колонки: что делает прибор (шаги текущего пинга), что он намерил сейчас,
+    // как читать картинку. Коротко: на мониторе мелко, длинное не прочитать.
     void Панель(RovSpeedSensor д, float t, float c, float W)
     {
         // Порядок событий показательного пинга: звук вниз → эхо воды → эхо дна → расчёт.
         float Wt = W / c, Rt = _дальностьПинга / c;
         int шаг = (t >= Wt && t < 2f * Wt) ? 1 : t < Rt ? 0 : t < 2f * Rt ? 2 : 3;
+        const string сер = "<color=#aab6bf>", кон = "</color>";
 
         var sb = new StringBuilder(768);
-        sb.Append("<size=120%><b>Скорость аппарата над дном</b></size>\n");
-        sb.Append("<color=#aab6bf>прибор: доплеровский лаг (DVL — Doppler Velocity Log)</color>\n\n");
-        Шаги(sb, шаг, "Посылаем звук вниз",
-            "Первым приходит слабое эхо от воды (" + W.ToString("F0") + " м)",
-            "Позже — сильное эхо от дна",
-            "По тону каждого эха считаем скорость");
+        sb.Append("<size=120%><b>Доплеровский лаг (DVL)</b></size>\n");
+        sb.Append(сер).Append("скорость аппарата над дном — по эху от дна").Append(кон).Append("\n\n");
+        Шаги(sb, шаг, "4 луча шлют звук вниз под " + д.УголЛуча.ToString("0.#") + "°",
+            "Эхо от воды (" + W.ToString("F0") + " м) — первым, слабое",
+            "Эхо от дна — позже, сильное",
+            "Сдвиг тона эха → скорость вдоль луча, 4 луча → скорость аппарата");
 
-        int сЭхом = 0; for (int i = 0; i < 4; i++) if (д.ЭхоОтДна[i]) сЭхом++;
-        sb.Append("\nЛучей видят дно: ").Append(сЭхом).Append(" из 4 · высота ").Append(д.Высота_м.ToString("F1")).Append(" м\n");
-        sb.Append("Измерений в секунду: ").Append(д.ТекущаяЧастота_Гц.ToString("F0"))
-          .Append(д.АдаптивнаяЧастота ? " (чем выше над дном — тем реже)" : "").Append("\n");
-
-        sb.Append("\n<b>Результат</b> <color=#aab6bf>(рабочий датчик)</color>\n");
-        if (д.ЗахватДна) sb.Append("Над дном: ").Append(Направление(д.СкоростьНадДномСредн)).Append("\n");
-        else sb.Append("<color=#f77>Дно потеряно — на мониторе застыло последнее значение</color>\n");
-        sb.Append("<color=#8cf>В воде: ").Append(д.ЕстьВода ? Направление(д.СкоростьВВодеСредн) : "—").Append("</color>\n");
-        sb.Append("<color=#6f8>Течение: ");
-        if (д.ЗахватДна && д.ЕстьВода)
+        int сЭхом = 0; float сдвиг = 0f;
+        for (int i = 0; i < 4; i++)
         {
-            float модуль = new Vector2(д.ТечениеЗемля.x, д.ТечениеЗемля.z).magnitude;
-            if (д.ТечениеНадёжно)
-                sb.Append(модуль.ToString("F2")).Append(" м/с, курс ").Append(д.КурсТечения.ToString("F0")).Append("°");
+            if (!д.ЭхоОтДна[i]) continue;
+            сЭхом++;
+            сдвиг = Mathf.Max(сдвиг, Mathf.Abs(д.СдвигЧастоты_Гц(д.РадиальнаяДно[i])));
+        }
+
+        sb.Append("\n<b>Сейчас</b>\n");
+        if (д.НомерИзмерения == 0) sb.Append(сер).Append("датчик ещё не делал замеров").Append(кон).Append("\n");
+        else
+        {
+            sb.Append("Дно видят ").Append(сЭхом).Append(" из 4 лучей");
+            if (сЭхом > 0) sb.Append(" — высота ").Append(д.Высота_м.ToString("F1")).Append(" м");
+            sb.Append("\nЗамеров в секунду: ").Append(д.ТекущаяЧастота_Гц.ToString("F0")).Append("\n");
+            if (д.ЗахватДна)
+            {
+                sb.Append("Над дном: <b>").Append(Направление(д.СкоростьНадДномСредн)).Append("</b>\n");
+                sb.Append(сер).Append("сдвиг тона до ").Append(сдвиг.ToString("F0")).Append(" Гц при ")
+                  .Append((д.ЧастотаИзлучения_Гц / 1000f).ToString("F0")).Append(" кГц").Append(кон).Append("\n");
+            }
             else
-                sb.Append("слабое (").Append(модуль.ToString("F2")).Append(" м/с) — направление не определить");
+                sb.Append("<color=#f77>Скорость не посчитать: нужно эхо от дна хотя бы у 3 лучей (дальность до ")
+                  .Append(д.ДальностьЗахватаДна_м.ToString("F0")).Append(" м). Монитор держит последнее значение</color>\n");
+            sb.Append("<color=#8cf>В воде: ").Append(д.ЕстьВода ? Направление(д.СкоростьВВодеСредн) : "—").Append(кон).Append("\n");
+            sb.Append("<color=#6f8>Течение: ");
+            if (д.ЗахватДна && д.ЕстьВода)
+            {
+                float модуль = new Vector2(д.ТечениеЗемля.x, д.ТечениеЗемля.z).magnitude;
+                if (д.ТечениеНадёжно) sb.Append(модуль.ToString("F2")).Append(" м/с, курс ").Append(д.КурсТечения.ToString("F0")).Append("°");
+                else sb.Append("слабое, направление не определить");
+            }
+            else sb.Append("— (нужно дно)");
+            sb.Append(кон);
+            // Для проверки: что на самом деле делает вода у аппарата (истина из движка).
+            if (_rov != null && _rov.Течение != null)
+            {
+                Vector3 vИст = _rov.Течение.Скорость(д.transform.position + Vector3.down * W);
+                Vector3 hИст = new Vector3(vИст.x, 0f, vИст.z);
+                sb.Append(сер).Append("  (на деле: ");
+                if (!_rov.Течение.включено) sb.Append("выключено, клавиша O");
+                else sb.Append(hИст.magnitude.ToString("F2")).Append(" м/с, ").Append(DvlJanus.Курс(hИст).ToString("F0")).Append("°");
+                sb.Append(")").Append(кон);
+            }
+            sb.Append("\n");
+            sb.Append("→ монитор «Скорость»: ").Append(RovSystems.speed_mps.ToString("F2")).Append(" м/с (")
+              .Append((RovSystems.speed_mps * 1.9438f).ToString("F2")).Append(" уз)\n");
         }
-        else sb.Append("—");
-        sb.Append("</color>\n");
-        sb.Append("На мониторе «Скорость»: ").Append(RovSystems.speed_mps.ToString("F2")).Append(" м/с (")
-          .Append((RovSystems.speed_mps * 1.9438f).ToString("F2")).Append(" уз)\n");
 
-        // Для проверки: что на самом деле делает вода у аппарата (истина из движка).
-        if (_rov != null && _rov.Течение != null)
-        {
-            Vector3 vИст = _rov.Течение.Скорость(д.transform.position + Vector3.down * W);
-            Vector3 hИст = new Vector3(vИст.x, 0f, vИст.z);
-            sb.Append("<color=#aab6bf>Истинное течение (проверка): ");
-            if (!_rov.Течение.включено) sb.Append("выключено (клавиша O)");
-            else sb.Append(hИст.magnitude.ToString("F2")).Append(" м/с, курс ").Append(DvlJanus.Курс(hИст).ToString("F0")).Append("°");
-            sb.Append("</color>\n");
-        }
-
-        sb.Append("\n<color=#aab6bf>Стрелки: белая — над дном, <color=#8cf>синяя</color> — в воде, <color=#6f8>зелёная</color> — течение\n");
-        sb.Append("Эхо <color=#8cf>синее</color> — сближаемся, <color=#f96>красное</color> — удаляемся\n");
-        sb.Append("Звук замедлен для наглядности, числа — настоящие</color>\n");
+        sb.Append("\n").Append(сер).Append("Эхо <color=#8cf>синее</color> — сближаемся с дном, <color=#f96>красное</color> — удаляемся\n");
+        sb.Append("Стрелки: белая — над дном, <color=#8cf>синяя</color> — в воде, <color=#6f8>зелёная</color> — течение\n");
+        sb.Append("Звук замедлен, числа — с рабочего датчика").Append(кон).Append("\n");
         if (_пауза) sb.Append("<color=#ffd75e>пауза</color>");
         ПоказатьПанель(sb.ToString());
     }
@@ -583,6 +617,7 @@ public class DopplerInstrumentsVisualizer : MonoBehaviour, IДемонстрац
         _стрелкаДно = НоваяЛиния("Скорость над дном", 0.05f);
         _стрелкаВода = НоваяЛиния("Скорость отн. воды", 0.05f);
         _стрелкаТечение = НоваяЛиния("Течение", 0.05f);
+        foreach (var lr in _корень.GetComponentsInChildren<LineRenderer>(true)) _линии.Add((lr, lr.widthMultiplier));
 
         var go = new GameObject("Панель прибора");
         go.layer = _слой;
@@ -668,8 +703,8 @@ public class DopplerInstrumentsVisualizer : MonoBehaviour, IДемонстрац
     void Волна(LineRenderer lr, Vector3 o, Vector3 d, float r, float λ, Color c)
     {
         const int N = 64;
-        float L = 5f * ДлинаВолныВизуально;              // длина пакета — ~5 исходных волн
-        float A = ДлинаВолныВизуально * 0.35f;           // амплитуда
+        float L = 5f * ДлинаВолныВизуально * _м;         // длина пакета — ~5 исходных волн
+        float A = ДлинаВолныВизуально * 0.35f * _м;      // амплитуда
         var кам = _видСбоку && _камСбоку != null ? _камСбоку : _камМонитора;
         Vector3 взгляд = кам != null ? кам.transform.forward : Vector3.forward;
         Vector3 поперёк = Vector3.Cross(d, взгляд);
@@ -689,7 +724,7 @@ public class DopplerInstrumentsVisualizer : MonoBehaviour, IДемонстрац
     }
 
     // Длина волны эха: сближение (v > 0) — короче (тон выше), удаление — длиннее.
-    float ДлинаЭха(float vr) => ДлинаВолныВизуально * Mathf.Clamp(1f - УсилениеДоплера * vr, 0.45f, 1.7f);
+    float ДлинаЭха(float vr) => ДлинаВолныВизуально * _м * Mathf.Clamp(1f - УсилениеДоплера * vr, 0.45f, 1.7f);
 
     // Цвет сдвига: сближение — синее, удаление — краснее, ноль — белый.
     static Color ЦветСдвига(float vr)

@@ -4,14 +4,14 @@ using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
 using UnityEngine.XR.Interaction.Toolkit.Inputs;
 
-// Переназначение кнопок контроллеров (режим «Гарнитура VR, автономно»).
+// Переназначение кнопок контроллеров (Настройки → Управление → Контроллеры).
 //
 // Два вида действий:
 //   1) штатные действия XR Interaction Toolkit — «взять» (Select: хват) и «нажать»
 //      (Activate + UI Press: курок) для каждой руки. Именно на них построены рычаги
 //      и кнопки пульта, поэтому переназначение действует на всё взаимодействие;
-//   2) действия тренажёра, у которых на клавиатуре есть F-клавиши, а на автономной
-//      гарнитуре клавиатуры нет: окно итогов, листание страниц.
+//   2) «Меню» тренажёра (итоги и пауза, справка, выход — то же, что меню на ладони):
+//      на автономной гарнитуре клавиатуры нет. Две кнопки — Menu левого и B правого.
 // Переназначение — штатный механизм Input System (binding overrides): меняется
 // только путь привязки контроллера (<XRController>), привязки рук/других
 // устройств не трогаются. Overrides сохраняются в PlayerPrefs JSON и
@@ -26,11 +26,20 @@ public static class ControllerBindings
     }
 
     // Свои действия тренажёра (с привязками по умолчанию).
-    public static readonly InputAction ОкноИтогов = new InputAction("ОкноИтогов", InputActionType.Button, "<XRController>{LeftHand}/menuButton");
-    public static readonly InputAction ДалееСтраница = new InputAction("ДалееСтраница", InputActionType.Button, "<XRController>{RightHand}/primaryButton");
-    public static readonly InputAction НазадСтраница = new InputAction("НазадСтраница", InputActionType.Button, "<XRController>{RightHand}/secondaryButton");
+    // «Меню» с любой руки: у правого контроллера своей кнопки меню для игры нет (системная
+    // занята гарнитурой) — там B. Заодно в эмуляторе: он жмёт кнопки только у того
+    // контроллера, которым сейчас управляют, и с правого меню раньше было не открыть.
+    public static readonly InputAction МенюЛевая = new InputAction("МенюЛевая", InputActionType.Button, "<XRController>{LeftHand}/menuButton");
+    public static readonly InputAction МенюПравая = new InputAction("МенюПравая", InputActionType.Button, "<XRController>{RightHand}/secondaryButton");
 
-    const string КлючXRI = "xri_binds_v1", КлючСвои = "trainer_binds_v1";
+    // Нажата кнопка «Меню»: рука 0 — левая, 1 — правая.
+    public static bool МенюНажато(out int рука)
+    {
+        рука = МенюЛевая.WasPressedThisFrame() ? 0 : МенюПравая.WasPressedThisFrame() ? 1 : -1;
+        return рука >= 0;
+    }
+
+    const string КлючXRI = "xri_binds_v1", КлючСвои = "trainer_binds_v2";   // v2: две кнопки «Меню»
     static InputActionAsset _xri;
     static bool _инициализировано;
 
@@ -41,11 +50,24 @@ public static class ControllerBindings
         _инициализировано = true;
         foreach (var a in Свои()) a.Enable();
         Загрузить(КлючСвои, Свои());
-        SceneManager.sceneLoaded += (_, __) => НайтиXRI();
+        SceneManager.sceneLoaded += (_, __) => { НайтиXRI(); ВыключитьПередвижение(); };
         НайтиXRI();
+        ВыключитьПередвижение();
     }
 
-    static InputAction[] Свои() => new[] { ОкноИтогов, ДалееСтраница, НазадСтраница };
+    // Оператор сидит за пультом — передвижения со стиков и кнопок нет. В риге XRI на них
+    // висят шаг (левый стик), поворот и телепорт (правый стик), «тащить мир» за Grip и
+    // прыжок на A: за пультом это срабатывало случайно — сжал Grip у рычага, и кабина
+    // поехала; нажал A — прыжок. Карты передвижения
+    // выключаются после того, как риг их включил (при каждой загрузке сцены).
+    static void ВыключитьПередвижение()
+    {
+        if (_xri == null) return;
+        foreach (var имя in new[] { "XRI Left Locomotion", "XRI Right Locomotion" })
+            _xri.FindActionMap(имя)?.Disable();
+    }
+
+    static InputAction[] Свои() => new[] { МенюЛевая, МенюПравая };
 
     // Ассет действий XRI берём у InputActionManager рига (он их и включает).
     static void НайтиXRI()
@@ -58,6 +80,7 @@ public static class ControllerBindings
                     _xri = asset;
                     string json = PlayerPrefs.GetString(КлючXRI, "");
                     if (!string.IsNullOrEmpty(json)) _xri.LoadBindingOverridesFromJson(json);
+                    ЗахватОбхватом();
                     return;
                 }
     }
@@ -76,13 +99,12 @@ public static class ControllerBindings
             int i = ИндексКонтроллера(acts[0]);
             if (i >= 0) л.Add(new Действие { Название = имя, Группа = группа, Действия = acts.ToArray(), Индекс = i });
         }
-        XRI("Схватить рычаг пульта", "левая рука", "XRI Left Interaction/Select");
-        XRI("Нажать кнопку пульта / меню", "левая рука", "XRI Left Interaction/Activate", "XRI Left Interaction/UI Press");
-        XRI("Схватить рычаг пульта", "правая рука", "XRI Right Interaction/Select");
-        XRI("Нажать кнопку пульта / меню", "правая рука", "XRI Right Interaction/Activate", "XRI Right Interaction/UI Press");
-        л.Add(new Действие { Название = "Открыть окно итогов", Группа = "тренажёр", Действия = new[] { ОкноИтогов }, Индекс = 0 });
-        л.Add(new Действие { Название = "Итоги: следующая страница", Группа = "тренажёр", Действия = new[] { ДалееСтраница }, Индекс = 0 });
-        л.Add(new Действие { Название = "Итоги: предыдущая страница", Группа = "тренажёр", Действия = new[] { НазадСтраница }, Индекс = 0 });
+        XRI("Захват рычага", "левая рука", "XRI Left Interaction/Select");
+        XRI("Нажатие кнопки / меню", "левая рука", "XRI Left Interaction/Activate", "XRI Left Interaction/UI Press");
+        XRI("Захват рычага", "правая рука", "XRI Right Interaction/Select");
+        XRI("Нажатие кнопки / меню", "правая рука", "XRI Right Interaction/Activate", "XRI Right Interaction/UI Press");
+        л.Add(new Действие { Название = "Меню", Группа = "левая рука", Действия = new[] { МенюЛевая }, Индекс = 0 });
+        л.Add(new Действие { Название = "Меню", Группа = "правая рука", Действия = new[] { МенюПравая }, Индекс = 0 });
         return л;
     }
 
@@ -94,24 +116,42 @@ public static class ControllerBindings
         return -1;
     }
 
-    // Человекочитаемое имя текущей кнопки: какой контроллер + какая кнопка на нём.
-    // На Quest/Touch: левый — X, Y, «меню»; правый — A, B. Курок — под указательным
-    // пальцем, хват — боковая кнопка под средним.
+    // Имя текущей кнопки по-русски, сторона буквой: «Захват Л» (Grip, боковая под
+    // средним пальцем), «Курок П» (Trigger, под указательным), «Стик Л». A, B, X, Y
+    // напечатаны на самих кнопках — остаются буквами; их и «Меню» нет на втором
+    // контроллере — сторону не пишем. Английские имена подписаны на стенде.
     public static string Имя(Действие д)
     {
         var b = д.Действия[0].bindings[д.Индекс];
         string p = (b.overridePath ?? b.path).ToLowerInvariant();
         bool левая = p.Contains("lefthand"), правая = p.Contains("righthand");
-        string рука = левая ? "левый · " : правая ? "правый · " : "";
-        string кнопка =
-            p.Contains("grip") ? "хват" :
-            p.Contains("trigger") ? "курок" :
-            p.Contains("primarybutton") ? (левая ? "кнопка X" : правая ? "кнопка A" : "A / X") :
-            p.Contains("secondarybutton") ? (левая ? "кнопка Y" : правая ? "кнопка B" : "B / Y") :
-            p.Contains("menu") ? "кнопка меню" :
-            p.Contains("thumbstickclick") || p.Contains("primary2daxisclick") ? "нажать стик" :
-            д.Действия[0].GetBindingDisplayString(д.Индекс);
-        return рука + кнопка;
+        string сторона = левая ? " Л" : правая ? " П" : "";
+        if (p.Contains("grip")) return "Захват" + сторона;
+        if (p.Contains("trigger")) return "Курок" + сторона;
+        if (p.Contains("primarybutton")) return левая ? "X" : правая ? "A" : "A / X";
+        if (p.Contains("secondarybutton")) return левая ? "Y" : правая ? "B" : "B / Y";
+        if (p.Contains("menu")) return "Меню";
+        if (p.Contains("thumbstickclick") || p.Contains("primary2daxisclick")) return "Нажатие стика" + сторона;
+        if (p.Contains("thumbstick") || p.Contains("primary2daxis")) return "Стик" + сторона;
+        return д.Действия[0].GetBindingDisplayString(д.Индекс) + сторона;
+    }
+
+    // Какая это рука и кнопка (для стенда контроллеров): рука 0 — левая, 1 — правая;
+    // кнопка — как в СтендКонтроллеров (trigger, grip, primary, secondary, menu, stick, stickclick).
+    public static bool Разобрать(Действие д, out int рука, out string кнопка)
+    {
+        var b = д.Действия[0].bindings[д.Индекс];
+        string p = (b.overridePath ?? b.path).ToLowerInvariant();
+        рука = p.Contains("lefthand") ? 0 : p.Contains("righthand") ? 1 : -1;
+        кнопка =
+            p.Contains("grip") ? СтендКонтроллеров.Хват :
+            p.Contains("trigger") ? СтендКонтроллеров.Курок :
+            p.Contains("primarybutton") ? СтендКонтроллеров.Первая :
+            p.Contains("secondarybutton") ? СтендКонтроллеров.Вторая :
+            p.Contains("menu") ? СтендКонтроллеров.Меню :
+            p.Contains("thumbstickclick") || p.Contains("primary2daxisclick") ? СтендКонтроллеров.НажатьСтик :
+            p.Contains("thumbstick") || p.Contains("primary2daxis") ? СтендКонтроллеров.Стик : null;
+        return рука >= 0 && кнопка != null;
     }
 
     public static bool Переназначено(Действие д) => !string.IsNullOrEmpty(д.Действия[0].bindings[д.Индекс].overridePath);
@@ -155,9 +195,33 @@ public static class ControllerBindings
         готово?.Invoke();
     }
 
+    // Рычаг рукой берут обхватом, как настоящую рукоятку: пальцы согнуты вокруг ручки, но
+    // кулак не сжат. Штатно XRI хватает рукой только по крепкому кулаку (graspFirm) или
+    // щипку — обхват до «крепкого» не дотягивал. Привязка руки — сила хвата graspValue с
+    // порогом 0,4; щипок остаётся. Привязки контроллеров не трогаются.
+    static void ЗахватОбхватом()
+    {
+        if (_xri == null) return;
+        foreach (var имя in new[] { "XRI Left Interaction/Select", "XRI Right Interaction/Select" })
+        {
+            var a = _xri.FindAction(имя);
+            if (a == null) continue;
+            for (int i = 0; i < a.bindings.Count; i++)
+            {
+                string путь = a.bindings[i].path;
+                if (!путь.StartsWith("<HandInteraction>") || !путь.EndsWith("/graspFirm")) continue;
+                a.ApplyBindingOverride(i, new InputBinding
+                {
+                    overridePath = путь.Substring(0, путь.Length - "graspFirm".Length) + "graspValue",
+                    overrideInteractions = "press(pressPoint=0.4)",
+                });
+            }
+        }
+    }
+
     public static void СброситьВсё()
     {
-        if (_xri != null) _xri.RemoveAllBindingOverrides();
+        if (_xri != null) { _xri.RemoveAllBindingOverrides(); ЗахватОбхватом(); }
         foreach (var a in Свои()) a.RemoveAllBindingOverrides();
         Сохранить();
     }

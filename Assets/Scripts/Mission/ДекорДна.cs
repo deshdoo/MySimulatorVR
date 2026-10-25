@@ -22,6 +22,9 @@ public static class ДекорДна
         var terrain = ПостроительДна.РельефПод(центр);
         if (terrain == null) return null;
         var корень = new GameObject(ИмяКорня) { layer = слой };
+        // В сцену рельефа (Main), а не в активную: при открытой рядом кабине декор
+        // попадал в её иерархию — камни и водоросли висели в сцене Cabin.
+        if (terrain.gameObject.scene.IsValid()) UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(корень, terrain.gameObject.scene);
         var rng = new System.Random(2718);
 
         int камней = РасставитьКамни(т, terrain, центр, корень.transform, слой, rng, предпросмотр);
@@ -119,7 +122,7 @@ public static class ДекорДна
         var mf = лёгкая != null ? лёгкая.GetComponentInChildren<MeshFilter>() : null;
         if (образец == null || mf == null || mf.sharedMesh == null) return 0;
         float высотаОбразца = образец.bounds.size.y;
-        var цвета = Окраски(образец.sharedMaterials);
+        var цвета = Окраски(образец.sharedMaterials, mf.sharedMesh.subMeshCount);
         foreach (var go in исходные)
         {
             if (Application.isPlaying) go.SetActive(false);
@@ -156,7 +159,9 @@ public static class ДекорДна
                 float h = r.bounds.size.y;
                 if (h > 0.001f) go.transform.localScale *= высотаОбразца * Mathf.Lerp(0.6f, 1.3f, (float)rng.NextDouble()) / h;
                 Посадить(go.transform, r, px, pz, грунт - 0.05f, 0f);
-                Отсекать(go, r, 0.02f);
+                // Порог ниже, чем у камней: водоросль тонкая и при 0,02 «вырастала» уже с ~11 м,
+                // где муть ещё прозрачная, — появление было заметно. С 0,013 — с ~16 м, в густой мути.
+                Отсекать(go, r, 0.013f);
                 // Корень-шарнир у грунта: вокруг него водоросль наклоняется целиком.
                 var шарнир = new GameObject("Водоросль") { layer = корень.gameObject.layer };
                 шарнир.transform.SetParent(корень, false);
@@ -180,24 +185,47 @@ public static class ДекорДна
 
     // Окраски водорослей — как у настоящих на шельфе: бурые и оливковые (ламинария,
     // фукус), красные (багрянки — на глубине их больше всего), зелёные пятнами.
-    static Material[][] Окраски(Material[] образец)
+    // Материалы собираются заново на URP Lit (у образца берутся только текстуры): копия
+    // материала образца из сцены у части кустов рисовалась ярко-фиолетовой — так Unity
+    // показывает шейдер, который не собрался. Слотов — по числу частей меша: пустой слот
+    // тоже рисуется фиолетовым.
+    static Material[][] Окраски(Material[] образец, int частей)
     {
+        var lit = Shader.Find("Universal Render Pipeline/Lit");
+        var исх = образец.Length > 0 && образец[0] != null ? образец[0] : null;
+        Debug.Log($"[Дно] Водоросли: образец — {образец.Length} материал(ов), шейдер «{(исх != null && исх.shader != null ? исх.shader.name : "нет")}», " +
+                  $"частей у лёгкого меша {частей}; материалы собираются на {(lit != null ? lit.name : "копии образца")}.");
         var оттенки = new[]
         {
             // Тёмные и приглушённые: на глубине свет слабый, яркие цвета выглядели мультяшно.
             new Color(0.30f, 0.25f, 0.15f),   // бурая
             new Color(0.26f, 0.30f, 0.16f),   // оливковая
-            new Color(0.36f, 0.15f, 0.13f),   // красная
-            new Color(0.32f, 0.19f, 0.21f),   // тёмно-розовая
+            new Color(0.28f, 0.17f, 0.10f),   // красно-бурая (багрянка): чистый красный в голубой мути лиловеет
             new Color(0.17f, 0.28f, 0.18f),   // зелёная
+            new Color(0.24f, 0.24f, 0.15f),   // буро-зелёная
+            // Розовой больше нет: под голубой мутью и холодным светом фар она выходила
+            // лиловой и выглядела как «не загрузилась текстура».
         };
+        int слотов = Mathf.Max(1, Mathf.Max(частей, образец.Length));
         var наборы = new Material[оттенки.Length][];
         for (int k = 0; k < оттенки.Length; k++)
         {
-            наборы[k] = new Material[образец.Length];
-            for (int m = 0; m < образец.Length; m++)
+            наборы[k] = new Material[слотов];
+            for (int m = 0; m < слотов; m++)
             {
-                var мат = new Material(образец[m]) { name = образец[m].name + " (окраска)" };
+                var о = m < образец.Length && образец[m] != null ? образец[m] : исх;
+                Material мат;
+                if (lit != null)
+                {
+                    мат = new Material(lit) { name = (о != null ? о.name : "Водоросль") + " (окраска)" };
+                    var tex = о == null ? null : о.HasProperty("_BaseMap") ? о.GetTexture("_BaseMap") : о.HasProperty("_MainTex") ? о.GetTexture("_MainTex") : null;
+                    if (tex != null) мат.SetTexture("_BaseMap", tex);
+                    var норм = о != null && о.HasProperty("_BumpMap") ? о.GetTexture("_BumpMap") : null;
+                    if (норм != null) { мат.SetTexture("_BumpMap", норм); мат.EnableKeyword("_NORMALMAP"); }
+                    мат.SetFloat("_Cull", 0f);   // лента водоросли видна с обеих сторон
+                }
+                else if (о != null) мат = new Material(о) { name = о.name + " (окраска)" };
+                else continue;
                 if (мат.HasProperty("_BaseColor")) мат.SetColor("_BaseColor", оттенки[k]);
                 else if (мат.HasProperty("_Color")) мат.SetColor("_Color", оттенки[k]);
                 if (мат.HasProperty("_Smoothness")) мат.SetFloat("_Smoothness", 0.15f);   // без пластикового блеска

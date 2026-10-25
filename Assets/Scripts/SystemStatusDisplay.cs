@@ -71,10 +71,23 @@ public class SystemStatusDisplay : MonoBehaviour
         // Подписи на мониторе заданы в сцене под прежний аппарат с батареей — меняем на «Марлин».
         foreach (var t in FindObjectsByType<TMP_Text>(FindObjectsInactive.Include, FindObjectsSortMode.None))
         {
-            if (t.name == "Энергосистема") t.text = "   Питание (кабель)";
+            if (t.name == "Энергосистема") t.text = "   Питание";   // «(кабель)» не влезал и наезжал на строки
             else if (t.name == "Подпись заряд" && t.text.Trim() == "заряд") t.text = "нагр.";
             else if (t.name == "Камера" && t.text.Trim() == "Камера") t.text = "Камеры";   // у «Марлина» их три
         }
+        // Строки блока подписаны в сцене под короткий текст («Гл шина 24 В»): «Судно 0.2 кВт»
+        // и «Резерв 100 %» переносились на вторую строку поверх разделителя. Теперь в одну
+        // строку, а если не влезает — шрифт чуть уменьшается.
+        foreach (var t in new[] { ГлавнаяШина, ВспомогательнаяШина, Резерв }) ВОднуСтроку(t);
+    }
+
+    static void ВОднуСтроку(TMP_Text t)
+    {
+        if (t == null) return;
+        t.textWrappingMode = TextWrappingModes.NoWrap;
+        t.fontSizeMax = t.fontSize;
+        t.fontSizeMin = t.fontSize * 0.6f;
+        t.enableAutoSizing = true;
     }
 
     void Update()

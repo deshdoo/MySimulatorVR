@@ -122,6 +122,8 @@ public class RovPokeButton : MonoBehaviour
         }
         _interactable.selectEntered.AddListener(OnSelectEntered);
         _interactable.hoverEntered.AddListener(OnHoverEntered);
+        НаведениеПальцем.Добавить(_interactable);   // руками: подсветка, когда палец ближе 10 см
+        УпорРук.Кнопка(_interactable);              // и рука-призрак встаёт на кнопку
     }
 
     void OnDisable()
@@ -140,7 +142,7 @@ public class RovPokeButton : MonoBehaviour
     {
         if (!нажиматьПриКасании) return;
         if (!(args.interactorObject is XRPokeInteractor)) return;
-        ПопробоватьНажать();
+        ПопробоватьНажать(args.interactorObject);
     }
 
     void OnSelectEntered(SelectEnterEventArgs args)
@@ -149,15 +151,16 @@ public class RovPokeButton : MonoBehaviour
         // почему-то не сработало: кнопка всё равно нажмётся. Антидребезг не даёт продавливанию
         // продублировать уже засчитанное касание. Захват/щипок/курок (при толькоPoke) не жмут.
         if (толькоPoke && !(args.interactorObject is XRPokeInteractor)) return;
-        ПопробоватьНажать();
+        ПопробоватьНажать(args.interactorObject);
     }
 
     // Одно срабатывание не чаще, чем раз в антидребезг_с — палец на кромке кнопки
     // иначе многократно входит/выходит из зоны касания и «дребезжит» защёлкой.
-    void ПопробоватьНажать()
+    void ПопробоватьНажать(IXRInteractor кто)
     {
         if (Time.time < _следующееКасание_с) return;
         _следующееКасание_с = Time.time + Mathf.Max(0f, антидребезг_с);
+        Вибро.Импульс(кто, Вибро.Кнопка);
         Press();
     }
 
@@ -190,7 +193,7 @@ public class RovPokeButton : MonoBehaviour
         // Подсветка при наведении (сигнал, что интерактабл ловит палец/луч)
         if (_highlightMat != null)
         {
-            bool hovered = _interactable != null && _interactable.isHovered;
+            bool hovered = _interactable != null && (_interactable.isHovered || НаведениеПальцем.Наведён(_interactable));
             if (hovered)
             {
                 _highlightMat.EnableKeyword("_EMISSION");

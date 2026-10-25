@@ -36,6 +36,7 @@ public class ИконкаКабины : MonoBehaviour
         var rt = (RectTransform)go.transform;
         rt.sizeDelta = new Vector2(Холст, Холст);
         rt.localScale = Vector3.one * (Диаметр_м / Холст);
+        УпорРук.Окно(rt);
 
         var и = go.AddComponent<ИконкаКабины>();
         и._действие = действие; и._открыто = открыто;
@@ -60,8 +61,10 @@ public class ИконкаКабины : MonoBehaviour
         box.center = new Vector3(0f, 0f, -10f);
         box.size = new Vector3(Холст, Холст, 40f);
         и._и = зона.AddComponent<XRSimpleInteractable>();
-        и._и.selectEntered.AddListener(_ => и.Нажать());
-        и._и.hoverEntered.AddListener(a => { if (a.interactorObject is XRPokeInteractor) и.Нажать(); });
+        зона.AddComponent<UnityEngine.XR.Interaction.Toolkit.Filtering.XRPokeFilter>();   // иначе палец не замечает (см. VrPanel)
+        НаведениеПальцем.Добавить(и._и);
+        и._и.selectEntered.AddListener(a => { Вибро.Импульс(a.interactorObject, Вибро.Кнопка); и.Нажать(); });
+        и._и.hoverEntered.AddListener(a => { if (a.interactorObject is XRPokeInteractor) { Вибро.Импульс(a.interactorObject, Вибро.Кнопка); и.Нажать(); } });
         return и;
     }
 
@@ -82,7 +85,7 @@ public class ИконкаКабины : MonoBehaviour
             Vector3 от = Vector3.ProjectOnPlane(transform.position - cam.transform.position, Vector3.up);
             if (от.sqrMagnitude > 1e-6f) transform.rotation = Quaternion.LookRotation(от, Vector3.up);
         }
-        float цель = _и != null && _и.isHovered ? 1.12f : 1f;
+        float цель = _и != null && (_и.isHovered || НаведениеПальцем.Наведён(_и)) ? 1.12f : 1f;
         _масштаб = Mathf.Lerp(_масштаб, цель, 1f - Mathf.Exp(-12f * Time.unscaledDeltaTime));
         transform.localScale = Vector3.one * (Диаметр_м / Холст) * _масштаб;
         if (_кольцо != null) _кольцо.enabled = _открыто != null && _открыто();

@@ -8,7 +8,9 @@ using UnityEngine;
 //     Assets/Terrain/<ИмяДанных>.asset и назначается рельефу под трассой (только если
 //     версия формул изменилась — иначе ничего не делается);
 //   • труба показывается предпросмотром с примером повреждений — скрытый объект,
-//     в файл сцены не сохраняется и убирается перед Play.
+//     в файл сцены не сохраняется и убирается перед Play и при закрытии сцены
+//     (такие объекты Unity сам при смене сцены не удаляет — без этого камни и
+//     водоросли оставались висеть в открытой после неё сцене Cabin).
 // Изменения рельефа и сдвиг объектов на дне — через Undo, сцену остаётся сохранить.
 [InitializeOnLoad]
 static class ПредпросмотрДна
@@ -25,14 +27,19 @@ static class ПредпросмотрДна
             else if (s == PlayModeStateChange.EnteredEditMode) EditorApplication.delayCall += Обновить;
         };
         EditorSceneManager.sceneOpened += (_, __) => EditorApplication.delayCall += Обновить;
+        EditorSceneManager.sceneClosing += (_, __) => Убрать();
     }
 
+    // Ищем через Resources.FindObjectsOfTypeAll: FindObjectsByType объекты с флагом DontSave
+    // не возвращает — из-за этого старые предпросмотры не находились и копились (камни и
+    // водоросли висели и в сцене Cabin). Ассеты (префабы) не трогаем.
     static void Убрать()
     {
-        foreach (var t in Object.FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None))
-            if (t != null && t.parent == null && (t.name == ИмяПредпросмотра || t.name == ДекорДна.ИмяКорня) &&
-                (t.gameObject.hideFlags & HideFlags.DontSave) != 0)
-                Object.DestroyImmediate(t.gameObject);
+        foreach (var go in Resources.FindObjectsOfTypeAll<GameObject>())
+            if (go != null && go.transform.parent == null && !EditorUtility.IsPersistent(go) &&
+                (go.name == ИмяПредпросмотра || go.name == ДекорДна.ИмяКорня) &&
+                (go.hideFlags & HideFlags.DontSave) != 0)
+                Object.DestroyImmediate(go);
     }
 
     static void Обновить()

@@ -89,7 +89,8 @@ public class MissionDebriefPanel : MonoBehaviour
     TMP_Text _заголовок, _надписьДалее, _надписьЗавершить;
     GameObject _кнопкаНазад, _кнопкаДалее;
     readonly List<Image> _точки = new List<Image>();
-    readonly List<(Image фон, XRSimpleInteractable кнопка, Color цвет)> _кнопки = new List<(Image, XRSimpleInteractable, Color)>();
+    class КнопкаОкна { public Image Фон, Обводка; public XRSimpleInteractable И; public Color Цвет; public float Уровень; }
+    readonly List<КнопкаОкна> _кнопки = new List<КнопкаОкна>();
     readonly List<GameObject> _страницы = new List<GameObject>();
     readonly List<Стр> _порядок = new List<Стр>();
     Material _матUI;
@@ -106,6 +107,8 @@ public class MissionDebriefPanel : MonoBehaviour
     string _путьОтчёта;
     // Итоговый отчёт (и состояние для «Продолжить») записан в архив — можно уходить в меню.
     public bool ОтчётСохранён => _путьОтчёта != null;
+    public bool Видно => _видно;
+    public bool Итоговое => _итоговое;   // конечное окно миссии — не закрывается
 
     static MissionStats S => MissionStats.Instance;
 
@@ -139,18 +142,8 @@ public class MissionDebriefPanel : MonoBehaviour
             if (_видно && клавишаДалее != Key.None && kb[KeyBindings.K(клавишаДалее)].wasPressedThisFrame) Далее();
             if (_видно && клавишаНазад != Key.None && kb[KeyBindings.K(клавишаНазад)].wasPressedThisFrame) Назад();
         }
-        // Те же действия с контроллера (на автономной гарнитуре клавиатуры нет):
-        // по умолчанию «меню» левого — окно, A/B правого — листание; переназначаются в меню.
-        if (!MainMenu.Открыто)
-        {
-            if (ControllerBindings.ОкноИтогов.WasPressedThisFrame())
-            {
-                if (!_видно) Показать();
-                else if (!_итоговое) Скрыть();
-            }
-            if (_видно && ControllerBindings.ДалееСтраница.WasPressedThisFrame()) Далее();
-            if (_видно && ControllerBindings.НазадСтраница.WasPressedThisFrame()) Назад();
-        }
+        // С контроллера окно открывают из «Меню» (МенюНаЛадони: кнопка Menu / B) и там же
+        // закрывают той же кнопкой. Листают кнопками ДАЛЕЕ / НАЗАД в самом окне.
 
         if (_показатьВ > 0f && Time.unscaledTime >= _показатьВ) { _показатьВ = -1f; Показать(); }
 
@@ -162,8 +155,13 @@ public class MissionDebriefPanel : MonoBehaviour
         if (!_видно && _альфа <= 0f) _корень.SetActive(false);
         if (_видно) Догонять();
 
-        foreach (var (фон, кнопка, цвет) in _кнопки)
-            if (фон != null) фон.color = кнопка.isHovered ? цвет : new Color(цвет.r, цвет.g, цвет.b, 0.22f);
+        // Подсветка наведения — плавная, как в главном меню (VrPanel).
+        foreach (var к in _кнопки)
+        {
+            if (к.Фон == null) continue;
+            к.Уровень = Mathf.MoveTowards(к.Уровень, к.И.isHovered || НаведениеПальцем.Наведён(к.И) ? 1f : 0f, Time.unscaledDeltaTime / 0.1f);
+            Покрасить(к);
+        }
 
         if (_подтверждениеДо > 0f && Time.unscaledTime > _подтверждениеДо)
         {
@@ -337,6 +335,7 @@ public class MissionDebriefPanel : MonoBehaviour
         }
 
         _корень = new GameObject("MissionDebrief", typeof(RectTransform));
+        if (ПоверхГеометрии) КонтроллерыНадОкнами.Окно(_корень);
         var г = Голова();
         _корень.layer = ПодходящийСлой(г != null ? г.GetComponent<Camera>() : null);
         var canvas = _корень.AddComponent<Canvas>();
@@ -348,6 +347,7 @@ public class MissionDebriefPanel : MonoBehaviour
         var rt = (RectTransform)_корень.transform;
         rt.sizeDelta = new Vector2(W, H);
         rt.localScale = Vector3.one * (Ширина_м / W);
+        УпорРук.Окно(rt);
 
         if (ПоверхГеометрии && _матUI == null)
         {
@@ -356,8 +356,13 @@ public class MissionDebriefPanel : MonoBehaviour
             _матUI.SetInt("unity_GUIZTestMode", (int)CompareFunction.Always);
         }
 
-        Прямоугольник(rt, 0, 0, W, H, ЦветФона);
-        Прямоугольник(rt, 0, 0, W, 4, _итоговое ? ЦветАкцент : ЦветСредне);   // жёлтая полоса — «миссия идёт»
+        // Подложка: мягкая тень, скруглённый фон, кромка, полоса сверху (жёлтая — «миссия идёт»).
+        const float размытие = 36f;
+        UiStyle.Тень(Прямоугольник(rt, -размытие, -размытие + 10f, W + 2 * размытие, H + 2 * размытие, new Color(0f, 0f, 0f, 0.45f)), размытие);
+        Прямоугольник(rt, 0, 0, W, H, ЦветФона, VrPanel.РадиусОкна);
+        UiStyle.Обвести(Прямоугольник(rt, 0, 0, W, H, new Color(1f, 1f, 1f, 0.07f)), VrPanel.РадиусОкна, 1.5f);
+        float отступ = VrPanel.РадиусОкна + 14f;
+        Прямоугольник(rt, отступ, 0, W - 2 * отступ, 3, _итоговое ? ЦветАкцент : ЦветСредне, 1.5f);
 
         // Шапка
         var m = MissionManager.Instance;
@@ -365,12 +370,18 @@ public class MissionDebriefPanel : MonoBehaviour
         // «Миссия не завершена» не пишем — это видно по жёлтой полосе и подсказке внизу.
         string режим = !_итоговое ? "ПРОМЕЖУТОЧНЫЕ ИТОГИ"
                      : (m != null && m.Досрочно) ? "ИТОГИ МИССИИ (досрочно)" : "ИТОГИ МИССИИ";
-        var строкаРежима = Текст(rt, 36, 18, 470, 24, 17, _итоговое ? ЦветВторостепенный : ЦветСредне);
+        // Ширина — до кнопок справа (у итогового окна их три, у промежуточного одна).
+        float ширинаШапки = _итоговое ? 470f : 580f;
+        var строкаРежима = Текст(rt, 36, 18, ширинаШапки, 24, 17, _итоговое ? ЦветВторостепенный : ЦветСредне);
         строкаРежима.enableWordWrapping = false;
         строкаРежима.overflowMode = TextOverflowModes.Ellipsis;
-        строкаРежима.text = режим + "  ·  " + (m != null ? m.НазваниеМиссии : "Миссия");
-        _заголовок = Текст(rt, 36, 44, 470, 44, 34, ЦветТекста);
+        строкаРежима.text = $"<cspace=4>{режим}</cspace>   {(m != null ? m.НазваниеМиссии : "Миссия")}";
+        // Заголовок страницы в одну строку: «Фотофиксация дефектов» переносилась на разделитель.
+        _заголовок = Текст(rt, 36, 44, ширинаШапки, 44, 34, ЦветТекста);
         _заголовок.fontStyle = FontStyles.Bold;
+        _заголовок.enableWordWrapping = false;
+        _заголовок.fontSizeMax = 34f; _заголовок.fontSizeMin = 24f;
+        _заголовок.enableAutoSizing = true;
 
         if (_итоговое)
         {
@@ -392,7 +403,7 @@ public class MissionDebriefPanel : MonoBehaviour
         _кнопкаДалее = _надписьДалее.transform.parent.gameObject;
         float x0 = W / 2f - (_порядок.Count * 26f) / 2f;
         for (int i = 0; i < _порядок.Count; i++)
-            _точки.Add(Прямоугольник(rt, x0 + i * 26f + 7f, H - 56, 12, 12, Color.white));
+            _точки.Add(Прямоугольник(rt, x0 + i * 26f + 7f, H - 56, 12, 12, Color.white, 6f));
 
         foreach (var стр in _порядок)
         {
@@ -482,7 +493,8 @@ public class MissionDebriefPanel : MonoBehaviour
         return порядок;
     }
 
-    static string Имя(MissionStats.ЗаписьДефекта д, int номер) => MissionStats.КороткаяМетка(д.Метка) + " " + номер;
+    // Без номера: номера в журнале, на схеме и под снимками только путали.
+    static string Имя(MissionStats.ЗаписьДефекта д, int номер) => MissionStats.КороткаяМетка(д.Метка);
 
     void СтраницаОсмотр(RectTransform rt, MissionStats s)
     {
@@ -490,7 +502,7 @@ public class MissionDebriefPanel : MonoBehaviour
         {
             // Схема: полоса = вся труба от начала до конца. Голубым — где аппарат
             // прошёл рядом со включённым светом; риски — дефекты (зелёный — найден,
-            // красный — нет), цифра над риской = номер в журнале ниже.
+            // красный — нет).
             const float x = 36f, y = 168f, w = W - 72f, h = 20f;
             Подпись(rt, 36, 114, "ТРУБА: что осмотрено и где дефекты");
             Прямоугольник(rt, x, y, w, h, new Color(1f, 1f, 1f, 0.08f));
@@ -502,20 +514,10 @@ public class MissionDebriefPanel : MonoBehaviour
                 Прямоугольник(rt, x + w * i / n, y, w * (j - i) / n, h, Прозр(ЦветАкцент, 0.65f));
                 i = j;
             }
-            var номерПо = new int[s.Дефекты.Count];
-            var поНомерам = ПоНомерам(s);
-            for (int k = 0; k < поНомерам.Count; k++) номерПо[поНомерам[k]] = k + 1;
-            float прошлыйX = -999f; int ярус = 0;
-            for (int i = 0; i < s.Дефекты.Count; i++)   // по порядку вдоль трубы — для разводки ярусов
+            foreach (var д in s.Дефекты)
             {
-                var д = s.Дефекты[i];
                 float px = x + w * Mathf.Clamp01(д.KP_м / Mathf.Max(0.01f, s.ДлинаТрубы_м));
-                Color c = д.Обнаружен ? ЦветХорошо : ЦветПлохо;
-                Прямоугольник(rt, px - 1.5f, y - 6, 3, h + 12, c);
-                // Близкие дефекты — номера в два яруса, чтобы цифры не слипались.
-                ярус = px - прошлыйX < 26f ? 1 - ярус : 0;
-                прошлыйX = px;
-                Текст(rt, px - 20, y - 30 - ярус * 20, 40, 22, 18, c, TextAlignmentOptions.Top).text = "<b>" + номерПо[i] + "</b>";
+                Прямоугольник(rt, px - 1.5f, y - 6, 3, h + 12, д.Обнаружен ? ЦветХорошо : ЦветПлохо);
             }
             Текст(rt, x, y + 26, 200, 22, 15, ЦветВторостепенный).text = "начало";
             Текст(rt, x + w - 200, y + 26, 200, 22, 15, ЦветВторостепенный, TextAlignmentOptions.TopRight).text = "конец";
@@ -527,7 +529,7 @@ public class MissionDebriefPanel : MonoBehaviour
         else Текст(rt, 36, 130, W - 72, 30, 20, ЦветВторостепенный).text = "Схема недоступна: труба не найдена.";
 
         bool былУТрубы = s.ВремяУТрубы_с > 0f;
-        const string неБыл = "аппарат ещё не подходил к трубе";
+        const string неБыл = "не осматривал трубу ближе 4 м со светом";
         Плитка(rt, 36, 228, 300, 96, "Осмотрено трубы",
                s.ЕстьТруба ? MissionStats.Р($"{s.ДоляПокрытия * 100f:0} %") : "—",
                s.ЕстьТруба ? ЦветПоДоле(s.ДоляПокрытия) : ЦветВторостепенный,
@@ -542,7 +544,7 @@ public class MissionDebriefPanel : MonoBehaviour
                былУТрубы ? MissionStats.Р($"норма: не дальше {s.МаксДистанцияОсмотра_м:0.#} м") : неБыл);
 
         // Журнал дефектов. Шапка и строки — одно поле одной ширины, чтобы колонки <pos> совпадали.
-        Подпись(rt, 36, 342, $"ЖУРНАЛ ДЕФЕКТОВ  ·  найдено {s.ЧислоНайденных()} из {s.Дефекты.Count}");
+        Подпись(rt, 36, 342, $"ЖУРНАЛ ДЕФЕКТОВ  —  найдено {s.ЧислоНайденных()} из {s.Дефекты.Count}");
         string вт = Hex(ЦветВторостепенный);
         var sb = new StringBuilder();
         sb.Append($"<size=75%><color=#{вт}>ДЕФЕКТ<pos=40%>ГЛУБИНА<pos=65%>НАЙДЕН</color></size>\n");
@@ -573,7 +575,7 @@ public class MissionDebriefPanel : MonoBehaviour
         if (снимки.Count == 0)
         {
             Текст(rt, 36, 130, W - 72, 60, 22, ЦветВторостепенный).text =
-                "Снимков пока нет.\nКогда вы осмотрите дефект кнопкой осмотра, сюда попадёт кадр с камеры аппарата.";
+                "Снимков пока нет.\nКогда вы сфотографируете дефект красной кнопкой «ФОТО», сюда попадёт кадр с камеры аппарата.";
             return;
         }
 
@@ -608,7 +610,7 @@ public class MissionDebriefPanel : MonoBehaviour
         // (меньше 20 с) график ни о чём не говорит — вместо него подсказка.
         const float x = 36f, y = 146f, w = W - 72f, h = 150f;
         Подпись(rt, 36, 114, "ГЛУБИНА ПО ВРЕМЕНИ");
-        Прямоугольник(rt, x, y, w, h, new Color(1f, 1f, 1f, 0.04f));
+        Прямоугольник(rt, x, y, w, h, new Color(1f, 1f, 1f, 0.04f), 8f);
         var p = s.ПрофильГлубины;
         float длит = Mathf.Max(0, p.Count - 1) * MissionStats.ШагПрофиля_с;
         if (длит >= 20f)
@@ -678,8 +680,8 @@ public class MissionDebriefPanel : MonoBehaviour
                 $"{к[i].Название}  <size=72%><color=#{Hex(ЦветВторостепенный)}>{к[i].Пояснение}</color></size>";
             Текст(rt, W - 236, y, 200, 30, 23, ЦветТекста, TextAlignmentOptions.TopRight).text =
                 $"<b>{к[i].Балл:0}</b><color=#{Hex(ЦветВторостепенный)}> из {к[i].Макс:0}</color>";
-            Прямоугольник(rt, 36, y + 34, W - 72, 8, new Color(1f, 1f, 1f, 0.08f));
-            Прямоугольник(rt, 36, y + 34, (W - 72) * Mathf.Clamp01(доля), 8, ЦветПоДоле(доля));
+            Прямоугольник(rt, 36, y + 34, W - 72, 8, new Color(1f, 1f, 1f, 0.08f), 4f);
+            Прямоугольник(rt, 36, y + 34, (W - 72) * Mathf.Clamp01(доля), 8, ЦветПоДоле(доля), 4f);
         }
         float процент = s.ИтогПроцент(out float сумма, out float макс);
         Color цв = ЦветПоДоле(процент / 100f);
@@ -701,8 +703,9 @@ public class MissionDebriefPanel : MonoBehaviour
     void Плитка(RectTransform родитель, float x, float y, float w, float h, string подпись, string значение, Color цвет,
                 string пояснение = null)
     {
-        Прямоугольник(родитель, x, y, w, h, new Color(1f, 1f, 1f, 0.05f));
-        Прямоугольник(родитель, x, y, 4, h, цвет);   // цветная кромка = статус
+        Прямоугольник(родитель, x, y, w, h, new Color(1f, 1f, 1f, 0.045f), 8f);
+        UiStyle.Обвести(Прямоугольник(родитель, x, y, w, h, new Color(1f, 1f, 1f, 0.07f)), 8f, 1.2f);
+        Прямоугольник(родитель, x + 6, y + 10, 4, h - 20, цвет, 2f);   // цветная кромка = статус
         БезПереноса(Текст(родитель, x + 18, y + 8, w - 26, 22, 17, ЦветВторостепенный)).text = подпись;
         var v = БезПереноса(Текст(родитель, x + 18, y + 30, w - 26, 38, 30, цвет));
         v.fontStyle = FontStyles.Bold;
@@ -720,21 +723,38 @@ public class MissionDebriefPanel : MonoBehaviour
 
     TMP_Text Кнопка(RectTransform родитель, float x, float y, float w, float h, string надпись, Color цвет, Action действие)
     {
-        var фон = Прямоугольник(родитель, x, y, w, h, цвет);
+        float радиус = Mathf.Min(VrPanel.РадиусКнопки, Mathf.Min(w, h) * 0.3f);
+        var фон = Прямоугольник(родитель, x, y, w, h, цвет, радиус);
         var t = Текст((RectTransform)фон.transform, 0, 0, w, h, 26, Color.white, TextAlignmentOptions.Center);
         t.text = надпись;
+        var обводка = Прямоугольник((RectTransform)фон.transform, 0, 0, w, h, цвет);
+        UiStyle.Обвести(обводка, радиус, 1.5f);
 
         // Коллайдер в единицах канваса: масштаб корня переведёт его в метры.
         var go = фон.gameObject;
         var box = go.AddComponent<BoxCollider>();
-        box.center = new Vector3(w / 2f, -h / 2f, -10f);   // пивот прямоугольника — верхний левый угол
-        box.size = new Vector3(w, h, 40f);
+        // Тонкая зона у самой поверхности (2 мм перед окном, 8 мм за ним): палец жмёт там,
+        // где рука-призрак упирается в окно (УпорРук), а не за сантиметры до него; лучу
+        // толщина не важна.
+        box.center = new Vector3(w / 2f, -h / 2f, 3f);   // пивот прямоугольника — верхний левый угол
+        box.size = new Vector3(w, h, 10f);
         var кнопка = go.AddComponent<XRSimpleInteractable>();
-        кнопка.selectEntered.AddListener(_ => Нажать(действие));
+        go.AddComponent<UnityEngine.XR.Interaction.Toolkit.Filtering.XRPokeFilter>();   // иначе палец не замечает (см. VrPanel)
+        НаведениеПальцем.Добавить(кнопка);
+        кнопка.selectEntered.AddListener(a => { Вибро.Импульс(a.interactorObject, Вибро.Кнопка); Нажать(действие); });
         // Касание пальцем жмёт сразу, как кнопки пульта (RovPokeButton.нажиматьПриКасании).
-        кнопка.hoverEntered.AddListener(a => { if (a.interactorObject is XRPokeInteractor) Нажать(действие); });
-        _кнопки.Add((фон, кнопка, цвет));
+        кнопка.hoverEntered.AddListener(a => { if (a.interactorObject is XRPokeInteractor) { Вибро.Импульс(a.interactorObject, Вибро.Кнопка); Нажать(действие); } });
+        var к = new КнопкаОкна { Фон = фон, Обводка = обводка, И = кнопка, Цвет = цвет };
+        Покрасить(к);
+        _кнопки.Add(к);
         return t;
+    }
+
+    static void Покрасить(КнопкаОкна к)
+    {
+        Color c = к.Цвет;
+        к.Фон.color = Прозр(c, Mathf.Lerp(0.12f, 0.62f, к.Уровень));
+        к.Обводка.color = Прозр(c, Mathf.Lerp(0.32f, 1f, к.Уровень));
     }
 
     // Антидребезг: касание и продавливание одним пальцем не должны сработать дважды.
@@ -745,7 +765,7 @@ public class MissionDebriefPanel : MonoBehaviour
         действие();
     }
 
-    Image Прямоугольник(RectTransform родитель, float x, float y, float w, float h, Color цвет)
+    Image Прямоугольник(RectTransform родитель, float x, float y, float w, float h, Color цвет, float радиус = 0f)
     {
         var go = new GameObject("Rect", typeof(RectTransform));
         go.layer = _корень.layer;
@@ -756,6 +776,7 @@ public class MissionDebriefPanel : MonoBehaviour
         img.color = цвет;
         img.raycastTarget = false;
         if (_матUI != null) img.material = _матUI;
+        UiStyle.Скруглить(img, радиус);
         return img;
     }
 

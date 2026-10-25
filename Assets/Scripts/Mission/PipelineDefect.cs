@@ -45,6 +45,9 @@ public class PipelineDefect : MonoBehaviour
     [Range(0f, 3f)] public float ЯркостьПодсветки = 1.2f;
     [Tooltip("Сколько секунд трещина вспыхивает при осмотре, затем плавно гаснет.")]
     public float ВремяВспышки = 2f;
+    [Tooltip("Светящийся контур по границе повреждённого места — вспыхивает при снимке. " +
+             "У повреждений магистрали его строит МагистральныйТрубопровод (своего меша у метки нет).")]
+    [HideInInspector] public LineRenderer[] Контур;
 
     [Tooltip("Доп. реакция на обнаружение — звук, партиклы, подпись (вешай в инспекторе)")]
     public UnityEvent ПриОбнаружении;
@@ -56,6 +59,7 @@ public class PipelineDefect : MonoBehaviour
 
     private Material _mat;
     private float _вспышкаОсталось;   // сек до конца вспышки осмотра
+    private float _задержка;          // контур загорается чуть позже снимка — на фото его нет
 
     void Awake()
     {
@@ -68,7 +72,9 @@ public class PipelineDefect : MonoBehaviour
     Material Мат()
     {
         if (_mat != null) return _mat;
-        if (Подсветка == null) Подсветка = GetComponentInChildren<Renderer>();
+        if (Подсветка == null)
+            foreach (var r in GetComponentsInChildren<Renderer>())
+                if (!(r is LineRenderer)) { Подсветка = r; break; }   // линии контура — не метка
         if (Подсветка != null) _mat = Подсветка.material;
         return _mat;
     }
@@ -91,6 +97,23 @@ public class PipelineDefect : MonoBehaviour
     {
         if (Обнаружен) return;
         ПрименитьЭмиссию(ЦветОбнаружения * (ЯркостьПодсветки * Mathf.Clamp01(доля)));
+        ПоказатьКонтур(0.7f * Mathf.Clamp01(доля));
+    }
+
+    // Яркость контура 0..1: сердцевина и мягкий ореол вокруг неё.
+    void ПоказатьКонтур(float яркость)
+    {
+        if (Контур == null) return;
+        Color c = ЦветОбнаружения;
+        for (int i = 0; i < Контур.Length; i++)
+        {
+            var lr = Контур[i];
+            if (lr == null) continue;
+            bool ореол = lr.name.EndsWith("ореол");
+            c.a = яркость * (ореол ? 0.15f : 0.55f);   // полупрозрачно: видно и контур, и что под ним
+            lr.enabled = яркость > 0.01f;
+            lr.startColor = lr.endColor = c;
+        }
     }
 
     // Вызывается сканером в момент успешного осмотра — трещина ВСПЫХИВАЕТ на пару
@@ -100,6 +123,8 @@ public class PipelineDefect : MonoBehaviour
         if (Обнаружен) return;
         Обнаружен = true;
         _вспышкаОсталось = ВремяВспышки;
+        _задержка = 0.15f;
+        ПоказатьКонтур(0f);
         Debug.Log($"[Осмотр] Обнаружен дефект — {Метка}");
         ПриОбнаружении?.Invoke();
     }
@@ -110,6 +135,12 @@ public class PipelineDefect : MonoBehaviour
         _вспышкаОсталось -= Time.deltaTime;
         float доля = ВремяВспышки > 0.01f ? Mathf.Clamp01(_вспышкаОсталось / ВремяВспышки) : 0f;
         ПрименитьЭмиссию(ЦветОбнаружения * (ЯркостьПодсветки * доля));   // ярко → плавно в ноль
+
+        // Контур: после снимка — две быстрые вспышки, затем ровно светится и гаснет.
+        if (_задержка > 0f) { _задержка -= Time.deltaTime; ПоказатьКонтур(0f); return; }
+        float прошло = ВремяВспышки - _вспышкаОсталось;
+        float мигание = прошло < 0.6f ? 0.55f + 0.45f * Mathf.Cos(прошло * Mathf.PI * 2f / 0.3f) : 1f;
+        ПоказатьКонтур(Mathf.Clamp01(доля * 1.6f) * мигание);
     }
 
     // Наглядный радиус в редакторе.

@@ -15,8 +15,13 @@ using UnityEngine.SceneManagement;
 //     меши и материалы, только уменьшенные (без скриптов и коллайдеров);
 //   • модель аппарата летит по записанной траектории (увеличена ×N для
 //     заметности — иначе в масштабе 1:40 она размером с ноготь);
-//   • траектория: вся — тусклая, пройденная — яркая; дефекты — булавки с номером
-//     (серая → зелёная в момент обнаружения, красная — не найден); удары — вспышки.
+//   • траектория — только пройденная к текущему моменту повтора (раньше рядом тусклой
+//     линией шёл весь путь вперёд, и его принимали за след другой миссии); дефекты —
+//     булавки с подписью (серая → зелёная в момент обнаружения, красная — не найден);
+//     удары — вспышки.
+//     Где траекторию заслоняет рельеф или труба, она видна сквозь них бледнее —
+//     путь читается с любого ракурса;
+//   • по краю рельефа — стенки до основания стола, как срез торта: макет не полый.
 // Масштаб подбирается так, чтобы район уместился в ~1 м.
 //
 // VR-камера кабины не рисует слой Underwater (и в меню это оставлено — фон меню
@@ -37,7 +42,8 @@ public class MenuReplayTable : MonoBehaviour
 
     List<MissionReplay.Кадр> _кадры;
     Transform _макет, _аппарат;
-    LineRenderer _пройдено;
+    LineRenderer _пройдено, _пройденоСквозь;
+    float _верхИнтереса = float.MaxValue;
     Vector3 _центр; float _масштаб, _сторона;
     Bounds _район;
     readonly List<(MissionArchive.Дефект д, Renderer голова)> _дефекты = new List<(MissionArchive.Дефект, Renderer)>();
@@ -60,6 +66,7 @@ public class MenuReplayTable : MonoBehaviour
         var спавнер = FindFirstObjectByType<PipelineDefectSpawner>();
         if (спавнер != null && спавнер.ГеометрияТрубы(out Vector3 ta, out Vector3 tb, out _)) { b.Encapsulate(ta); b.Encapsulate(tb); }
         _сторона = Mathf.Max(6f, Mathf.Max(b.size.x, b.size.z) + 6f);
+        _верхИнтереса = b.max.y + 8f;   // выше — судно на поверхности, буи: на макете не нужны
         _район = new Bounds(new Vector3(b.center.x, b.center.y, b.center.z), new Vector3(_сторона, b.size.y + 60f, _сторона));
         _масштаб = РазмерСтола / _сторона;
 
@@ -83,10 +90,8 @@ public class MenuReplayTable : MonoBehaviour
 
         _точкиМакета = new Vector3[_кадры.Count + 1];
         for (int i = 0; i < _кадры.Count; i++) _точкиМакета[i] = ВМакет(_кадры[i].поз);
-        var вся = Линия("ВсяТраектория", new Color(0.3f, 0.85f, 1f, 0.3f), 0.003f);
-        вся.positionCount = _кадры.Count;
-        вся.SetPositions(_точкиМакета);
-        _пройдено = Линия("Пройдено", new Color(0.35f, 0.95f, 1f, 1f), 0.005f);
+        _пройдено = Линия("Пройдено", new Color(0.35f, 0.95f, 1f, 1f), 0.006f);
+        _пройденоСквозь = Линия("Пройдено (сквозь)", new Color(0.35f, 0.95f, 1f, 0.4f), 0.006f, true);
 
         ПоставитьДефекты(запись, шрифт);
 
@@ -194,7 +199,93 @@ public class MenuReplayTable : MonoBehaviour
         _созданное.Add(m);
         mr.sharedMaterial = m;
         mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        ПостроитьСтенки(verts);
     }
+
+    // Стенки по краю рельефа — как срез у торта: от каждой точки кромки дна отвесно
+    // вниз до основания стола (уровень рамки), и дно макета. Выше рельефа стенки не
+    // поднимаются. Без них макет был полым: сбоку под поверхность было видно насквозь.
+    void ПостроитьСтенки(Vector3[] верх)
+    {
+        int n = Сетка + 1;
+        var v = new List<Vector3>(); var tri = new List<int>();
+        // Обход — так, чтобы лицевая сторона смотрела наружу (у Unity лицевая — по часовой).
+        void Сторона(System.Func<int, int> индекс, bool наоборот)
+        {
+            int база = v.Count;
+            for (int k = 0; k < n; k++)
+            {
+                Vector3 p = верх[индекс(k)];
+                v.Add(p); v.Add(new Vector3(p.x, 0f, p.z));
+            }
+            for (int k = 0; k < n - 1; k++)
+            {
+                int a = база + k * 2;
+                if (наоборот) { tri.Add(a); tri.Add(a + 2); tri.Add(a + 1); tri.Add(a + 2); tri.Add(a + 3); tri.Add(a + 1); }
+                else          { tri.Add(a); tri.Add(a + 1); tri.Add(a + 2); tri.Add(a + 2); tri.Add(a + 1); tri.Add(a + 3); }
+            }
+        }
+        Сторона(k => k, true);                  // ближний край (z = min)
+        Сторона(k => (n - 1) * n + k, false);   // дальний (z = max)
+        Сторона(k => k * n, false);             // левый (x = min)
+        Сторона(k => k * n + n - 1, true);      // правый (x = max)
+        // Дно макета — снизу тоже закрыт.
+        Vector3 Низ(int i) { var p = верх[i]; return new Vector3(p.x, 0f, p.z); }
+        int d = v.Count;
+        v.Add(Низ(0)); v.Add(Низ(n - 1)); v.Add(Низ((n - 1) * n)); v.Add(Низ(n * n - 1));
+        tri.Add(d); tri.Add(d + 1); tri.Add(d + 2); tri.Add(d + 1); tri.Add(d + 3); tri.Add(d + 2);
+
+        var mesh = new Mesh { name = "СтенкиМакета" };
+        mesh.SetVertices(v); mesh.SetTriangles(tri, 0);
+        mesh.RecalculateNormals(); mesh.RecalculateBounds();
+        _созданное.Add(mesh);
+        var go = new GameObject("Стенки");
+        go.transform.SetParent(_макет, false);
+        go.layer = СлойМакета;
+        go.AddComponent<MeshFilter>().sharedMesh = mesh;
+        var mr = go.AddComponent<MeshRenderer>();
+        var m = Процедуры.Освещаемый(new Color(0.44f, 0.37f, 0.28f));   // срез грунта темнее поверхности
+        if (m.HasProperty("_Cull")) m.SetFloat("_Cull", 0f);
+        _созданное.Add(m);
+        mr.sharedMaterial = m;
+        mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+    }
+
+    // Посторонняя труба: длинная и тонкая модель (или с «pipe» в названии материала).
+    // Модель целиком — вместе с опорами и хомутами, которые сами по себе не длинные.
+    static void ОтметитьЛишнее(Transform модель, Transform магистраль, HashSet<Transform> лишние)
+    {
+        if (модель == магистраль || магистраль.IsChildOf(модель)) return;
+        if (модель.GetComponentInChildren<UmbilicalCable>() != null || модель.GetComponentInChildren<RovController>() != null) return;
+        var все = модель.GetComponentsInChildren<MeshRenderer>(false);
+        // Папка сцены (камни, водоросли, всё подряд) — не модель трубы: разбираем по детям.
+        if (все.Length > 30)
+        {
+            foreach (Transform ребёнок in модель) ОтметитьЛишнее(ребёнок, магистраль, лишние);
+            return;
+        }
+        foreach (var mr in все)
+            if (Трубоподобная(mr, mr.bounds))
+            {
+                if (лишние.Add(модель))
+                    Debug.Log($"[Повтор] На макет не идёт посторонняя труба «{модель.name}» (деталь «{mr.name}»).");
+                return;
+            }
+    }
+
+    static bool Трубоподобная(MeshRenderer mr, Bounds bb)
+    {
+        float[] e = { bb.size.x, bb.size.y, bb.size.z };
+        System.Array.Sort(e);
+        if (e[2] > 2.5f && e[1] < 1.6f) return true;
+        foreach (var m in mr.sharedMaterials)
+            if (m != null && m.name.IndexOf("pipe", System.StringComparison.OrdinalIgnoreCase) >= 0) return true;
+        return false;
+    }
+
+    static bool Судно(Transform t) =>
+        t.root.name.IndexOf("boat", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+        t.root.name.IndexOf("ship", System.StringComparison.OrdinalIgnoreCase) >= 0;
 
     // Копии моделей сцены в районе работ (без аппарата, кабеля, эффектов меню и
     // гигантских плоскостей вроде поверхности воды).
@@ -260,6 +351,15 @@ public class MenuReplayTable : MonoBehaviour
         }
         if (вентиль != null && (труба == null || !вентиль.IsChildOf(труба))) КопияЦеликом(вентиль);
 
+        // Магистраль в бетоне заменила старую трубу на ножках, но в сцене остались другие
+        // трубные модели: всё «трубное» не из магистрали — мимо, вместе со своим корнем
+        // (опоры и хомуты такой модели не длинные, но тоже лишние).
+        var магистраль = труба != null ? труба.GetComponent<МагистральныйТрубопровод>() : null;
+        var лишниеКорни = new HashSet<Transform>();
+        if (магистраль != null)
+            foreach (var root in gameObject.scene.GetRootGameObjects())
+                ОтметитьЛишнее(root.transform, магистраль.transform, лишниеКорни);
+
         var кандидаты = new List<(MeshRenderer mr, MeshFilter mf, Bounds bb, float насыщ)>();
         foreach (var root in gameObject.scene.GetRootGameObjects())
             foreach (var mr in root.GetComponentsInChildren<MeshRenderer>(false))
@@ -274,6 +374,10 @@ public class MenuReplayTable : MonoBehaviour
                 if (mr.transform.root.name.Contains("Призрак")) continue;
                 if (Призрак.СломанныйМатериал(mr)) continue;
                 var bb = mr.bounds;
+                if (bb.min.y > _верхИнтереса || Судно(mr.transform)) continue;   // судно на поверхности — не к месту на дне
+                bool лишняя = false;
+                foreach (var к in лишниеКорни) if (mr.transform.IsChildOf(к)) { лишняя = true; break; }
+                if (лишняя) continue;
                 // Трубу и вентиль уже скопировали целиком — поштучно их не берём.
                 if (труба != null && mr.transform.IsChildOf(труба)) continue;
                 if (вентиль != null && mr.transform.IsChildOf(вентиль)) continue;
@@ -442,7 +546,7 @@ public class MenuReplayTable : MonoBehaviour
             метка.transform.localPosition = низ + Vector3.up * (высота + 0.018f);
             var t = метка.AddComponent<TextMeshPro>();
             if (шрифт != null) t.font = шрифт;
-            t.text = $"{д.метка} {i + 1}";
+            t.text = д.метка;
             t.fontSize = 0.15f; t.alignment = TextAlignmentOptions.Center; t.enableWordWrapping = false;
             t.color = д.найден ? new Color(0.35f, 0.95f, 0.5f) : new Color(1f, 0.38f, 0.32f);
             метка.AddComponent<КЗрителю>();
@@ -458,15 +562,30 @@ public class MenuReplayTable : MonoBehaviour
         if (r != null) r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
     }
 
-    LineRenderer Линия(string имя, Color цвет, float ширина)
+    // сквозь — линия рисуется поверх всего (без проверки глубины): её видно и там, где
+    // путь заслоняет рельеф или труба. Шейдер UI/Default берёт проверку глубины из
+    // unity_GUIZTestMode — тот же приём, что у VR-окон (VrPanel).
+    LineRenderer Линия(string имя, Color цвет, float ширина, bool сквозь = false)
     {
         var go = new GameObject(имя);
         go.transform.SetParent(_макет, false);
         var lr = go.AddComponent<LineRenderer>();
         lr.useWorldSpace = false;
         lr.widthMultiplier = ширина;
-        var m = Процедуры.Материал(true, Texture2D.whiteTexture);
-        m.SetColor("_BaseColor", цвет);
+        Material m;
+        var ui = сквозь ? Shader.Find("UI/Default") : null;
+        if (ui != null)
+        {
+            m = new Material(ui) { name = имя };
+            m.SetInt("unity_GUIZTestMode", (int)UnityEngine.Rendering.CompareFunction.Always);
+            m.color = Color.white;
+            lr.startColor = lr.endColor = цвет;
+        }
+        else
+        {
+            m = Процедуры.Материал(true, Texture2D.whiteTexture);
+            m.SetColor("_BaseColor", цвет);
+        }
         _созданное.Add(m);
         lr.sharedMaterial = m;
         lr.numCapVertices = 2;
@@ -519,8 +638,11 @@ public class MenuReplayTable : MonoBehaviour
             _индекс = индекс;
             _пройдено.positionCount = индекс + 2;
             _пройдено.SetPositions(_точкиМакета);
+            _пройденоСквозь.positionCount = индекс + 2;
+            _пройденоСквозь.SetPositions(_точкиМакета);
         }
         _пройдено.SetPosition(_пройдено.positionCount - 1, ВМакет(к.поз));
+        _пройденоСквозь.SetPosition(_пройденоСквозь.positionCount - 1, ВМакет(к.поз));
 
         foreach (var (д, r) in _дефекты)
             if (д.найден) r.sharedMaterial = Время >= д.время_с ? _зелёный : _серый;

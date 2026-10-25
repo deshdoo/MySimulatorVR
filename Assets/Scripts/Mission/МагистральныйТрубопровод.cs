@@ -76,6 +76,7 @@ public class МагистральныйТрубопровод : MonoBehaviour
         public float Длина_м;
         public float Зазор_м;
         public bool Подпёрт;        // допустимый (мелкий) пролёт — не дефект
+        public float ОтS, ДоS;      // где труба отрывается от грунта и где ложится снова, м по трассе
     }
 
     public class Повреждение
@@ -166,6 +167,7 @@ public class МагистральныйТрубопровод : MonoBehaviour
         РассчитатьТрубу();
         ВыбратьПовреждения(12345);
         var go = new GameObject("Предпросмотр трубы (не сохраняется)");
+        UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(go, gameObject.scene);   // в сцену трубы, а не в активную
         go.layer = Слой;
         go.AddComponent<MeshFilter>().sharedMesh = МешТрубы.Построить(this);
         go.AddComponent<MeshRenderer>().sharedMaterials = Материалы();
@@ -279,6 +281,8 @@ public class МагистральныйТрубопровод : MonoBehaviour
                     Длина_м = длина,
                     Зазор_м = _осьY - R - _грунт[макс],
                     Подпёрт = подпёрт,
+                    ОтS = начало * _ds,
+                    ДоS = конец * _ds,
                 });
             }
             начало = -1;
@@ -473,7 +477,113 @@ public class МагистральныйТрубопровод : MonoBehaviour
         };
         if (п.Тип == PipelineDefect.ТипДефекта.Утечка || п.Тип == PipelineDefect.ТипДефекта.СледЯкоря)
             go.AddComponent<PipelineLeakEmitter>();
+        КонтурПовреждения(d, п);
         return d;
+    }
+
+    // ── Контур повреждения ─────────────────────────────────────────────────────
+    // Светящаяся линия по границе повреждённого места, лежит на поверхности трубы (в
+    // 1–3 см над ней). Вспыхивает при снимке (PipelineDefect.Контур) — видно, что
+    // именно засчитано и где кончается повреждение. Размеры — те же, что у формы
+    // повреждения в МешТрубы, с небольшим запасом наружу.
+
+    static Material _матКонтура;
+    const float Над_м = 0.012f;
+
+    void КонтурПовреждения(PipelineDefect d, Повреждение п)
+    {
+        float R = Радиус, к = п.Размер;
+        var линии = new List<Vector3[]>();
+        switch (п.Тип)
+        {
+            case PipelineDefect.ТипДефекта.СколБетона: линии.Add(Овал(п.S, п.Угол, 0.3f * к * 1.2f, 0.4f * к * 1.2f, 2f, R + Над_м)); break;
+            case PipelineDefect.ТипДефекта.Утечка: линии.Add(Овал(п.S, п.Угол, 0.3f, 0.3f, 2f, R + Над_м)); break;
+            case PipelineDefect.ТипДефекта.СледЯкоря: линии.Add(Овал(п.S, п.Угол, 0.9f * 1.15f, 0.75f * 1.15f, 2f, R + Над_м)); break;
+            case PipelineDefect.ТипДефекта.ПовреждениеСтыка:
+                линии.Add(Овал(п.S, п.Угол, ШиринаСтыка_м * 0.5f + 0.06f, 0.45f * к * 1.2f, 4f, R + Над_м)); break;
+            case PipelineDefect.ТипДефекта.Трещина:   // трещина идёт по окружности на ±1,1·размер рад
+                линии.Add(Овал(п.S, п.Угол, 0.12f, (1.1f * к + 0.15f) * R, 2f, R + Над_м)); break;
+            case PipelineDefect.ТипДефекта.ПостороннийПредмет:   // сеть накрывает верх и свисает по бокам
+                линии.Add(Овал(п.S, 0f, 1.1f * к + 0.15f, (Mathf.PI * 0.5f + 0.2f) * R, 4f, R + 0.035f)); break;
+            case PipelineDefect.ТипДефекта.Анод:   // браслет целиком: два кольца по его краям
+            {
+                float пол = ДлинаАнода_м * 0.5f + 0.03f;
+                линии.Add(Кольцо(п.S - пол, R + Над_м));
+                линии.Add(Кольцо(п.S + пол, R + Над_м));
+                break;
+            }
+        }
+        ПрикрепитьКонтур(d, линии);
+    }
+
+    // Провис: контур по низу трубы над ямой — от места отрыва от грунта до места, где ложится снова.
+    void КонтурПровиса(PipelineDefect d, Пролёт п)
+    {
+        if (п.ДоS <= п.ОтS) return;
+        float R = Радиус;
+        ПрикрепитьКонтур(d, new List<Vector3[]> { Овал((п.ОтS + п.ДоS) * 0.5f, Mathf.PI, (п.ДоS - п.ОтS) * 0.5f + 0.2f, 1.25f * R, 4f, R + Над_м) });
+    }
+
+    // Суперэллипс на поверхности трубы: полуоси вдоль (м) и по окружности (м дуги),
+    // степень 2 — овал, 4 — прямоугольник со скруглёнными углами.
+    Vector3[] Овал(float s0, float угол0, float a, float b, float степень, float r)
+    {
+        const int N = 96;
+        var т = new Vector3[N];
+        for (int i = 0; i < N; i++)
+        {
+            float φ = i * Mathf.PI * 2f / N, cs = Mathf.Cos(φ), sn = Mathf.Sin(φ);
+            float ds = a * Mathf.Sign(cs) * Mathf.Pow(Mathf.Abs(cs), 2f / степень);
+            float dt = b * Mathf.Sign(sn) * Mathf.Pow(Mathf.Abs(sn), 2f / степень);
+            т[i] = ТочкаНаТрубе(s0 + ds, угол0 + dt / Радиус, r, out _);
+        }
+        return т;
+    }
+
+    Vector3[] Кольцо(float s, float r)
+    {
+        const int N = 64;
+        var т = new Vector3[N];
+        for (int i = 0; i < N; i++) т[i] = ТочкаНаТрубе(s, i * Mathf.PI * 2f / N, r, out _);
+        return т;
+    }
+
+    // Каждая линия — сердцевина и ореол (шире и прозрачнее): так она «светится».
+    void ПрикрепитьКонтур(PipelineDefect d, List<Vector3[]> линии)
+    {
+        if (линии.Count == 0) return;
+        if (_матКонтура == null)
+        {
+            var sh = Shader.Find("Sprites/Default");
+            if (sh == null) return;
+            _матКонтура = new Material(sh) { name = "Контур дефекта (auto)" };
+        }
+        var все = new List<LineRenderer>();
+        for (int i = 0; i < линии.Count; i++)
+        {
+            все.Add(ЛинияКонтура(d.transform, "Контур " + i, линии[i], 0.02f));
+            все.Add(ЛинияКонтура(d.transform, "Контур " + i + " ореол", линии[i], 0.07f));
+        }
+        d.Контур = все.ToArray();
+        d.ВремяВспышки = Mathf.Max(d.ВремяВспышки, 3f);   // контур держится подольше, чтобы успеть разглядеть
+    }
+
+    LineRenderer ЛинияКонтура(Transform родитель, string имя, Vector3[] точки, float ширина)
+    {
+        var go = new GameObject(имя) { layer = Слой };
+        go.transform.SetParent(родитель, false);
+        var lr = go.AddComponent<LineRenderer>();
+        lr.useWorldSpace = true;
+        lr.loop = true;
+        lr.positionCount = точки.Length;
+        lr.SetPositions(точки);
+        lr.widthMultiplier = ширина;
+        lr.sharedMaterial = _матКонтура;
+        lr.numCornerVertices = 2;
+        lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        lr.receiveShadows = false;
+        lr.enabled = false;
+        return lr;
     }
 
     // Неподпёртый провис — дефект для осмотра. Метка без меша: сам провис виден по
@@ -488,6 +598,7 @@ public class МагистральныйТрубопровод : MonoBehaviour
         d.Тип = PipelineDefect.ТипДефекта.Провис;
         d.Описание = $"свободный пролёт {п.Длина_м:0} м, зазор до дна {п.Зазор_м:0.0} м";
         d.РадиусОбнаружения = Mathf.Max(3f, п.Длина_м * 0.5f);
+        КонтурПровиса(d, п);
         return d;
     }
 

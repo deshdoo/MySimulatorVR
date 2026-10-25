@@ -1,14 +1,20 @@
+using TMPro;
 using UnityEngine;
 using UnityEngine.Events;
+using UnityEngine.SceneManagement;
 using UnityEngine.InputSystem;
 using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
 using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
-// Кнопка ОСМОТРА (сканирования) — отдельная от RovPokeButton, потому что действие
-// МОМЕНТНОЕ, а не защёлка: нажал → сканер засчитывает подсвеченную рядом трещину
-// (RovScanner.Просканировать через статический Instance, кросс-сцена). Кнопка кратко
-// вдавливается и возвращается.
+// Кнопка «ФОТО» (осмотр) — отдельная от RovPokeButton, потому что действие
+// МОМЕНТНОЕ, а не защёлка: нажал → кадр с монитора, в него попадают все дефекты в
+// радиусе осмотра (RovScanner.Просканировать через статический Instance, кросс-сцена).
+// Кнопка кратко вдавливается и возвращается.
+//
+// Вид строится сам при запуске (КруглаяКрасная): вместо квадратной клавиши — круглый
+// красный колпачок, вокруг ободок-индикатор (горит жёлтым, когда на мониторе виден дефект, который можно
+// снять) и надпись «ФОТО» на пульте со стороны оператора.
 //
 // Логика нажатия и hover-подсветка — как у RovPokeButton (тот же XRI select от руки/
 // контроллера, тот же ход и подсветка при наведении). Индикатор (если задан) горит,
@@ -50,6 +56,11 @@ public class RovScanButton : MonoBehaviour
     public Color highlightColor = new Color(0.3f, 0.7f, 1f);
     [Range(0f, 3f)] public float highlightIntensity = 1f;
 
+    [Header("Вид «ФОТО»")]
+    [Tooltip("При запуске заменить квадратную клавишу круглой красной кнопкой с ободком-индикатором и надписью.")]
+    public bool КруглаяКрасная = true;
+    public string Надпись = "ФОТО";
+
     [Header("Строгий VR-ввод (обычно НЕ нужно)")]
     [Tooltip("ВЫКЛ (по умолчанию) — нажатие по любому select: руками palcem-poke, " +
              "контроллером наведение+курок/grab. ВКЛ — только палец-poke.")]
@@ -77,6 +88,7 @@ public class RovScanButton : MonoBehaviour
 
         if (movingPart == null) movingPart = transform;
         _movingPartHome = movingPart.localPosition;
+        if (КруглаяКрасная) ПостроитьКруглую();
 
         if (indicator != null) _indicatorMat = indicator.material;
         if (highlightRenderer != null)
@@ -99,6 +111,8 @@ public class RovScanButton : MonoBehaviour
         }
         _interactable.selectEntered.AddListener(OnSelectEntered);
         _interactable.hoverEntered.AddListener(OnHoverEntered);
+        НаведениеПальцем.Добавить(_interactable);   // руками: подсветка, когда палец ближе 10 см
+        УпорРук.Кнопка(_interactable);              // и рука-призрак встаёт на кнопку
     }
 
     void OnDisable()
@@ -116,7 +130,7 @@ public class RovScanButton : MonoBehaviour
     {
         if (!нажиматьПриКасании) return;
         if (!(args.interactorObject is XRPokeInteractor)) return;
-        ПопробоватьНажать();
+        ПопробоватьНажать(args.interactorObject);
     }
 
     void OnSelectEntered(SelectEnterEventArgs args)
@@ -124,13 +138,14 @@ public class RovScanButton : MonoBehaviour
         // Продавливание — запасной путь, если касание-hover не сработало; антидребезг
         // не даёт продублировать уже засчитанное касание. См. RovPokeButton.
         if (толькоPoke && !(args.interactorObject is XRPokeInteractor)) return;
-        ПопробоватьНажать();
+        ПопробоватьНажать(args.interactorObject);
     }
 
-    void ПопробоватьНажать()
+    void ПопробоватьНажать(IXRInteractor кто)
     {
         if (Time.time < _следующееКасание_с) return;
         _следующееКасание_с = Time.time + Mathf.Max(0f, антидребезг_с);
+        Вибро.Импульс(кто, Вибро.Кнопка);
         Press();
     }
 
@@ -162,7 +177,7 @@ public class RovScanButton : MonoBehaviour
         // Подсветка при наведении (как у RovPokeButton).
         if (_highlightMat != null)
         {
-            bool hovered = _interactable != null && _interactable.isHovered;
+            bool hovered = _interactable != null && (_interactable.isHovered || НаведениеПальцем.Наведён(_interactable));
             if (hovered)
             {
                 _highlightMat.EnableKeyword("_EMISSION");
@@ -174,6 +189,66 @@ public class RovScanButton : MonoBehaviour
                 _highlightMat.SetColor("_EmissionColor", _highlightOrigEmission);
             }
         }
+    }
+
+    // Круглая красная кнопка поверх места квадратной клавиши: колпачок (едет при нажатии
+    // вместе с объектом кнопки), неподвижный ободок-индикатор и надпись. Коллайдер и
+    // XR-взаимодействие остаются от исходной клавиши — жмётся там же, где раньше.
+    void ПостроитьКруглую()
+    {
+        var исходный = GetComponent<MeshRenderer>();
+        if (исходный == null) return;
+        Bounds b = исходный.bounds;
+        float d = Mathf.Clamp(Mathf.Min(b.size.x, b.size.z) * 0.9f, 0.03f, 0.08f);
+        const float высота = 0.014f;
+        исходный.enabled = false;
+
+        var колпачок = Цилиндр("Колпачок ФОТО", new Vector3(b.center.x, b.max.y - высота * 0.5f + 0.003f, b.center.z),
+                               d, высота, new Color(0.78f, 0.05f, 0.04f), 0.6f, transform);
+        var ободок = Цилиндр("Ободок ФОТО", new Vector3(b.center.x, b.max.y - высота + 0.002f, b.center.z),
+                             d * 1.28f, 0.004f, new Color(0.10f, 0.10f, 0.10f), 0.3f, transform.parent);
+        if (transform.parent == null) SceneManager.MoveGameObjectToScene(ободок.gameObject, gameObject.scene);   // а не в активную сцену миссии
+        highlightRenderer = колпачок;
+        highlightColor = new Color(1f, 0.45f, 0.35f);
+        if (indicator == null) indicator = ободок;
+
+        // Надпись лежит на пульте между кнопкой и оператором, читается с его места.
+        var кам = Camera.main;
+        Vector3 кОператору = кам != null ? Vector3.ProjectOnPlane(кам.transform.position - b.center, Vector3.up) : Vector3.left;
+        кОператору = кОператору.sqrMagnitude > 1e-4f ? кОператору.normalized : Vector3.left;
+        var go = new GameObject("Надпись ФОТО");
+        go.transform.SetParent(transform.parent, false);
+        if (transform.parent == null) SceneManager.MoveGameObjectToScene(go, gameObject.scene);
+        go.transform.SetPositionAndRotation(new Vector3(b.center.x, b.max.y - высота + 0.003f, b.center.z) + кОператору * (d * 0.64f + 0.014f),
+                                            Quaternion.LookRotation(Vector3.down, -кОператору));
+        var tm = go.AddComponent<TextMeshPro>();
+        foreach (var t in FindObjectsByType<TMP_Text>(FindObjectsSortMode.None))
+            if (t != tm && t.font != null) { tm.font = t.font; break; }   // шрифт пульта — с кириллицей
+        tm.text = "<b>" + Надпись + "</b>";
+        tm.fontSize = 0.14f;
+        tm.alignment = TextAlignmentOptions.Center;
+        tm.textWrappingMode = TextWrappingModes.NoWrap;
+        tm.color = new Color(0.92f, 0.92f, 0.9f);
+        tm.rectTransform.sizeDelta = new Vector2(0.1f, 0.02f);
+    }
+
+    static MeshRenderer Цилиндр(string имя, Vector3 центр, float диаметр, float высота, Color цвет, float гладкость, Transform родитель)
+    {
+        var go = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        go.name = имя;
+        Object.DestroyImmediate(go.GetComponent<Collider>());   // жмётся коллайдер исходной клавиши
+        go.transform.position = центр;
+        go.transform.localScale = new Vector3(диаметр, высота * 0.5f, диаметр);   // примитив: Ø1, высота 2
+        go.transform.SetParent(родитель, true);
+        var r = go.GetComponent<MeshRenderer>();
+        var sh = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+        var m = new Material(sh) { name = имя };
+        if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", цвет);
+        m.color = цвет;
+        if (m.HasProperty("_Smoothness")) m.SetFloat("_Smoothness", гладкость);
+        r.sharedMaterial = m;
+        r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        return r;
     }
 
     void Press()
