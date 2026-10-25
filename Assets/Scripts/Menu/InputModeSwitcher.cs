@@ -31,10 +31,15 @@ using UnityEngine.XR.Interaction.Toolkit.Inputs.Simulation;
 // (enableFarCasting), остаётся ближний захват рычагов. Включать его обратно пытается
 // PokeGestureDetector рига (после жеста «указать»), поэтому он гасится каждый кадр.
 // Что под пальцем — подсвечивает НаведениеПальцем.
+//
+// У контроллеров палец-poke (XRPokeInteractor) выключен всегда: касание корпусом
+// контроллера жало кнопки пульта и окон. Касанием жмут только руки, контроллеры — лучом
+// с курком.
 public class РежимВводаРига : MonoBehaviour
 {
     readonly List<GameObject> _лишние = new List<GameObject>();
     readonly List<NearFarInteractor> _лучиРук = new List<NearFarInteractor>();
+    readonly List<XRPokeInteractor> _тычкиКонтроллеров = new List<XRPokeInteractor>();
     float _следПоиск;
     float _перезапускВ = -1f;   // когда перезапустить менеджеры после смены режима
     float _сверитьДо = -1f;     // до какого времени догонять эмулятор до режима (редактор)
@@ -84,6 +89,8 @@ public class РежимВводаРига : MonoBehaviour
         else if (Time.unscaledTime >= _следПоиск) Найти();
         foreach (var go in _лишние)
             if (go != null && go.activeSelf) go.SetActive(false);
+        foreach (var т in _тычкиКонтроллеров)
+            if (т != null && т.enabled) т.enabled = false;
         if (режим == GameSettings.Ввод.Руки)
             foreach (var л in _лучиРук)
                 if (л != null && л.enableFarCasting) л.enableFarCasting = false;
@@ -94,11 +101,14 @@ public class РежимВводаРига : MonoBehaviour
         _следПоиск = Time.unscaledTime + 1f;   // риг мог смениться при загрузке сцены
         _лишние.Clear();
         _лучиРук.Clear();
+        _тычкиКонтроллеров.Clear();
         bool руки = GameSettings.РежимВвода == GameSettings.Ввод.Руки;
         foreach (var м in FindObjectsByType<XRInputModalityManager>(FindObjectsSortMode.None))
         {
             foreach (var рука in new[] { м.leftHand, м.rightHand })
                 if (рука != null) _лучиРук.AddRange(рука.GetComponentsInChildren<NearFarInteractor>(true));
+            foreach (var к in new[] { м.leftController, м.rightController })
+                if (к != null) _тычкиКонтроллеров.AddRange(к.GetComponentsInChildren<XRPokeInteractor>(true));
             // В редакторе контроллеры в режиме «Руки» не прячем: эмулятор XR Interaction
             // Simulator по умолчанию изображает контроллеры, а руками нажимает плохо —
             // спрятав контроллеры, в меню нечем было бы даже вернуть режим обратно. На
@@ -138,9 +148,10 @@ public class РежимВводаРига : MonoBehaviour
         if (!Application.isEditor || _переключить == null) { _сверитьДо = -1f; return; }
         var нужно = режим == GameSettings.Ввод.Руки ? SimulatedDeviceLifecycleManager.DeviceMode.Hand
                                                     : SimulatedDeviceLifecycleManager.DeviceMode.Controller;
-        bool готово = true;
+        bool готово = true, есть = false;
         foreach (var э in FindObjectsByType<SimulatedDeviceLifecycleManager>(FindObjectsSortMode.None))
         {
+            if (э.isActiveAndEnabled) есть = true;
             if (!э.isActiveAndEnabled || э.deviceMode == нужно || э.deviceMode == SimulatedDeviceLifecycleManager.DeviceMode.None) continue;
             готово = false;
             bool занят = _занят != null && (bool)_занят.GetValue(э);
@@ -153,6 +164,9 @@ public class РежимВводаРига : MonoBehaviour
                                  $"руки {(м != null && (м.leftHand != null || м.rightHand != null) ? "есть" : "НЕ заданы")}.");
             }
         }
+        // Эмулятор появляется не в первом кадре: пока его нет, ждём (без гарнитуры в редакторе
+        // он будет), иначе он встал бы в свой режим по умолчанию уже после проверки.
+        if (!есть) готово = false;
         if (готово)
         {
             if (_перезапускВ < 0f && _сверитьДо - Time.unscaledTime < 2.6f) _перезапускВ = Time.unscaledTime + 0.1f;   // догнали не с первого раза — менеджеры заново

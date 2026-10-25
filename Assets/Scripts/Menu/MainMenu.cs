@@ -43,6 +43,7 @@ public class MainMenu : MonoBehaviour
     XROrigin _риг;
     Transform _голова;
     Vector3 _ригПоз; Quaternion _ригПов;
+    Vector3 _головаПоз, _головаВперёд;   // где стоял и куда смотрел оператор в кабине до меню
     readonly List<(Renderer r, bool был)> _скрытые = new List<(Renderer, bool)>();
     TMP_FontAsset _шрифт;
 
@@ -124,6 +125,7 @@ public class MainMenu : MonoBehaviour
         _затемнение.color = Color.black;
 
         _ригПоз = _риг.transform.position; _ригПов = _риг.transform.rotation;
+        _головаПоз = _голова.position; _головаВперёд = Vector3.ProjectOnPlane(_голова.forward, Vector3.up);
         СкрытьНастоящийАппарат(true);
         СкрытьДругиеСцены(true);
 
@@ -176,6 +178,23 @@ public class MainMenu : MonoBehaviour
             _локомоция.Clear();
             if (_тело != null) { _тело.enabled = _телоБыло; _тело = null; }
         }
+    }
+
+    // Назад в кабину: риг — на прежнее место, затем сдвиг и поворот вокруг вертикали так,
+    // чтобы голова встала туда же, где была до меню, и смотрела туда же. Только риг на
+    // старое место не годился: в меню голова уходит от центра рига (шаги, эмулятор), и
+    // вернувшаяся камера оказывалась у стены или за ней — CabinBounds выталкивал её в угол.
+    // Высота головы своя (рост и наклон), меняется только положение по полу.
+    void ВернутьВКабину()
+    {
+        _риг.transform.SetPositionAndRotation(_ригПоз, _ригПов);
+        if (_голова == null) return;
+        Vector3 сейчас = Vector3.ProjectOnPlane(_голова.forward, Vector3.up);
+        if (сейчас.sqrMagnitude > 1e-4f && _головаВперёд.sqrMagnitude > 1e-4f)
+            _риг.transform.RotateAround(_голова.position, Vector3.up, Vector3.SignedAngle(сейчас, _головаВперёд, Vector3.up));
+        Vector3 сдвиг = _головаПоз - _голова.position;
+        сдвиг.y = 0f;
+        _риг.transform.position += сдвиг;
     }
 
     void ПеренестиРиг()
@@ -359,7 +378,7 @@ public class MainMenu : MonoBehaviour
             var з = последний[0];
             float доля = з.максБалл > 0 ? з.балл / з.максБалл : 0f;
             p.Текст(_экранRt, x + 20, 158 + кадрH, w - 40, 26, 16, p.ЦветВтор, перенос: false).text =
-                $"Последний результат: <color=#{VrPanel.Hex(ЦветПоДоле(доля))}><b>{з.балл:0} из {з.максБалл:0}</b></color>   {з.дата}";
+                $"Прошлый раз: <color=#{VrPanel.Hex(ЦветПоДоле(доля))}><b>{з.балл:0} из {з.максБалл:0}</b></color>   {КороткаяДата(з.дата)}";
             p.Кнопка(_экранRt, x + 20, 428, w - 40, 36, "<b>ПОДРОБНЕЕ</b>", p.ЦветАкцент, () => { _выбранная = з; ПоказатьЭкран(Экран.Подробно); }, кегль: 20);
         }
     }
@@ -746,7 +765,7 @@ public class MainMenu : MonoBehaviour
         УбратьСтенд();
         if (_светОператора != null) Destroy(_светОператора);   // в кабине светит её свет
         if (_диорама != null) { _диорама.Убрать(); _диорама = null; }
-        if (_риг != null) { _риг.transform.SetPositionAndRotation(_ригПоз, _ригПов); ЗаморозитьЛокомоцию(false); }
+        if (_риг != null) { ВернутьВКабину(); ЗаморозитьЛокомоцию(false); }
         СкрытьНастоящийАппарат(false);
         СкрытьДругиеСцены(false);
         if (испытания) TelemetryCsvLogger.ПрефиксСледующего = "испытания";
@@ -774,6 +793,11 @@ public class MainMenu : MonoBehaviour
         _заморозка.Разморозить();
         Открыто = false;
     }
+
+    // «25.10.2026 23:15» → «25.10 23:15»: полная дата не влезала в строку и обрезалась до «25.».
+    static string КороткаяДата(string дата) =>
+        System.DateTime.TryParseExact(дата, "dd.MM.yyyy HH:mm", null, System.Globalization.DateTimeStyles.None, out var д)
+            ? д.ToString("dd.MM HH:mm") : дата;
 
     void Выход()
     {

@@ -42,6 +42,7 @@ public class VrPanel
     class КнопкаЗапись
     {
         public Image Фон, Обводка; public XRSimpleInteractable И; public Color Цвет; public Func<bool> Выбрана;
+        public BoxCollider Коробка; public Action Действие;
         public bool БылНавод; public float Уровень;
     }
     readonly List<КнопкаЗапись> _кнопки = new List<КнопкаЗапись>();
@@ -89,13 +90,34 @@ public class VrPanel
         {
             var к = _кнопки[i];
             if (к.Фон == null) { _кнопки.RemoveAt(i); continue; }
-            bool навод = к.И.isHovered || НаведениеПальцем.Наведён(к.И);
+            bool пальцем = НаведениеПальцем.Наведён(к.И);
+            bool навод = к.И.isHovered || пальцем;
+            // Действие может пересобрать или закрыть окно (список кнопок меняется) — дальше не идём.
+            if (пальцем && ПальцемНасквозь(к)) { Нажать(к.Действие); return; }
             bool выбрана = к.Выбрана != null && к.Выбрана();
             к.Уровень = Mathf.MoveTowards(к.Уровень, навод ? 1f : выбрана ? 0.65f : 0f, шаг);
             Покрасить(к);
             if (навод && !к.БылНавод) UiSound.Наведение();
             к.БылНавод = навод;
         }
+    }
+
+    // Палец прошёл лицевую плоскость кнопки спереди назад в её пределах — нажатие. Своё, в
+    // дополнение к poke XRI: в окнах поверх кабины касание пальцем срабатывало не всегда.
+    // Лицо окна смотрит на оператора, т.е. в −z холста; кнопка — от z = 0 вглубь.
+    static bool ПальцемНасквозь(КнопкаЗапись к)
+    {
+        if (к.Коробка == null || !к.Коробка.enabled) return false;
+        var t = к.Коробка.transform;
+        Vector3 ц = к.Коробка.center, пол = к.Коробка.size * 0.5f;
+        for (int с = 0; с < 2; с++)
+        {
+            if (!НаведениеПальцем.Палец(с, out Vector3 сейчас, out Vector3 было)) continue;
+            Vector3 a = t.InverseTransformPoint(было), b = t.InverseTransformPoint(сейчас);
+            if (a.z >= 0f || b.z < 0f) continue;
+            if (Mathf.Abs(b.x - ц.x) <= пол.x && Mathf.Abs(b.y - ц.y) <= пол.y) return true;
+        }
+        return false;
     }
 
     static void Покрасить(КнопкаЗапись к)
@@ -232,7 +254,7 @@ public class VrPanel
         и.selectEntered.AddListener(a => Нажать(действие, a.interactorObject));
         // Касание пальцем жмёт сразу, как кнопки пульта.
         и.hoverEntered.AddListener(a => { if (a.interactorObject is XRPokeInteractor) Нажать(действие, a.interactorObject); });
-        var к = new КнопкаЗапись { Фон = фон, Обводка = обводка, И = и, Цвет = цвет, Выбрана = выбрана };
+        var к = new КнопкаЗапись { Фон = фон, Обводка = обводка, И = и, Цвет = цвет, Выбрана = выбрана, Коробка = box, Действие = действие };
         к.Уровень = выбрана != null && выбрана() ? 0.65f : 0f;
         Покрасить(к);
         _кнопки.Add(к);

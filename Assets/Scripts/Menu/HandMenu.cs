@@ -96,7 +96,7 @@ public class МенюНаЛадони : MonoBehaviour
         if (_риг == null || _риг.Camera == null) return false;
         var рука = _руки.rightHand;
         if (!рука.isTracked) return false;
-        var т = _риг.Origin.transform;   // суставы — относительно начала XR Origin
+        var т = НаведениеПальцем.ПространствоРук(_риг);   // суставы — в пространстве трекинга (Camera Offset)
         Pose корень = рука.rootPose;
         if (рука.GetJoint(XRHandJointID.Palm).TryGetPose(out Pose п)) корень = п;
         ладонь = т.TransformPoint(корень.position);
@@ -116,7 +116,7 @@ public class МенюНаЛадони : MonoBehaviour
     const float ШиринаОкна_м = 0.30f, ЗазорОтРуки_м = 0.09f;
 
     // Меню кнопкой контроллера: так же, как у ладони, — сбоку от контроллера к середине
-    // тела. Клавишей (рука -1) или контроллер не виден — перед глазами, чуть ниже.
+    // тела. Клавишей (рука -1) или контроллер не виден (режим рук) — перед лицом, на уровне глаз.
     void ОткрытьУКонтроллера(int рука)
     {
         if (_риг == null) _риг = FindFirstObjectByType<XROrigin>();
@@ -127,7 +127,7 @@ public class МенюНаЛадони : MonoBehaviour
         bool уКонтроллера = контроллер != null && контроллер.activeInHierarchy;
         Vector3 где = уКонтроллера
             ? контроллер.transform.position
-            : камера.position + Vector3.ProjectOnPlane(камера.forward, Vector3.up).normalized * 0.45f + Vector3.down * 0.2f;
+            : камера.position + Vector3.ProjectOnPlane(камера.forward, Vector3.up).normalized * 0.45f + Vector3.down * 0.04f;   // на уровне глаз (Открыть поднимает на 4 см)
         Открыть(где, Vector3.zero, камера.position, !уКонтроллера ? 0 : рука == 0 ? -1 : 1);
     }
 

@@ -118,6 +118,7 @@ public class LeverInteractable : MonoBehaviour
         }
         _grabHand = null;
         _захватил = null;
+        ДержитРукой = -1;
         Все.Remove(this);
     }
 
@@ -126,15 +127,52 @@ public class LeverInteractable : MonoBehaviour
     public IXRInteractor Держит => _захватил;
     public XRBaseInteractable Интерактабл => _interactable;
 
+    // Захват рукой без XRI (ХватРычагаРукой): у рук select от XRI приходит только с профилем
+    // Hand Interaction гарнитуры, в эмуляторе — никогда. Рука — точка-ладонь, которую ведёт
+    // ХватРычагаРукой; дальше всё как у захвата контроллером. -1 — рука не держит.
+    public int ДержитРукой { get; private set; } = -1;
+
+    public void ВзятьРукой(Transform ладонь, int рука)
+    {
+        if (_grabHand != null) return;   // уже держит контроллер или другая рука
+        ДержитРукой = рука;
+        НачатьЗахват(ладонь);
+    }
+
+    public void ОтпуститьРукой()
+    {
+        if (ДержитРукой < 0) return;
+        ДержитРукой = -1;
+        _grabHand = null;
+    }
+
+    // Держит ли рычаг эта рука (0 — левая, 1 — правая): своим хватом или XRI-захватом (не тычком).
+    public bool ДержитРука(int рука)
+    {
+        if (ДержитРукой == рука) return true;
+        return _захватил != null && !(_захватил is XRPokeInteractor) &&
+               _захватил.handedness == (рука == 0 ? InteractorHandedness.Left : InteractorHandedness.Right);
+    }
+
     void OnSelectEntered(SelectEnterEventArgs args)
     {
         // Рычаг тянут захватом, а не тычком: тыкающий палец (poke-интерактор) его не цепляет —
         // иначе случайное касание дёргало бы тягу. Хват идёт от grab/direct/near-интерактора
         // (щипок руки или grip/курок контроллера). Выключается галкой игнорироватьPoke.
         if (игнорироватьPoke && args.interactorObject is XRPokeInteractor) return;
-        _grabHand = args.interactorObject.transform;
+        // В режиме рук рычаг берёт только ХватРычагаРукой. На шлеме у рук есть и захват XRI
+        // (профиль Hand Interaction): две системы перехватывали бы рычаг друг у друга, и
+        // отпускался бы он по-разному.
+        if (GameSettings.РежимВвода == GameSettings.Ввод.Руки) return;
+        ДержитРукой = -1;
         _захватил = args.interactorObject;
         Вибро.Импульс(_захватил, Вибро.Захват);
+        НачатьЗахват(args.interactorObject.transform);
+    }
+
+    void НачатьЗахват(Transform рука)
+    {
+        _grabHand = рука;
         _grabStartHandPos = _grabHand.position;
         _grabStartAngle = _angle;
         _grabStartAngleLat = _angleLat;
@@ -152,6 +190,20 @@ public class LeverInteractable : MonoBehaviour
         return (баз * л).normalized;
     }
 
+    // Захват рукой: на сколько градусов рука повернула рукоятку вокруг оси качания (локальная
+    // ось родителя: Z — вперёд/назад, X — вбок) от точки захвата. Рычаг поворачивается на
+    // минус этот угол (localEulerAngles = −угол), поэтому рукоятка идёт за рукой по своей
+    // дуге, как настоящая. Рука у самой оси (ближе 3 см в плоскости качания) — угол не меняем.
+    float ПоворотРукой(Vector3 осьЛок)
+    {
+        Quaternion баз = transform.parent != null ? transform.parent.rotation : Quaternion.identity;
+        Vector3 ось = (баз * осьЛок).normalized;
+        Vector3 было = Vector3.ProjectOnPlane(_grabStartHandPos - transform.position, ось);
+        Vector3 стало = Vector3.ProjectOnPlane(_grabHand.position - transform.position, ось);
+        if (было.magnitude < 0.03f || стало.magnitude < 0.03f) return 0f;
+        return Vector3.SignedAngle(было, стало, ось);
+    }
+
     // Проекция вектора на плоскость качания (перпендикулярную оси), нормализованная.
     static Vector3 ВПлоскости(Vector3 v, Vector3 ось)
     {
@@ -161,6 +213,7 @@ public class LeverInteractable : MonoBehaviour
 
     void OnSelectExited(SelectExitEventArgs args)
     {
+        if (args.interactorObject != _захватил) return;   // рычаг держит рука своим хватом
         _grabHand = null;
         _захватил = null;
     }
@@ -186,7 +239,12 @@ public class LeverInteractable : MonoBehaviour
 
         if (axis == LeverAxis.Planar) { ОбновитьПланар(hovered); return; }
 
-        if (_grabHand != null && рукаНаРукоятке)
+        if (_grabHand != null && ДержитРукой >= 0)
+        {
+            Vector3 осьЛок = axis == LeverAxis.Yaw ? Vector3.right : Vector3.forward;
+            _angle = Mathf.Clamp(_grabStartAngle - ПоворотРукой(осьЛок), minAngle, maxAngle);
+        }
+        else if (_grabHand != null && рукаНаРукоятке)
         {
             // Рука держит рукоятку: угол рычага = стартовый + УГЛОВОЕ смещение руки вокруг
             // оси качания. Верх рычага «догоняет» руку, поэтому рука остаётся на рукоятке.
@@ -239,8 +297,17 @@ public class LeverInteractable : MonoBehaviour
 
         float normalized = Mathf.InverseLerp(minAngle, maxAngle, _angle) * 2f - 1f;
         if (invert) normalized *= -1f;
-        WriteToInput(normalized);
+        WriteToInput(КриваяПульта(normalized));
     }
+
+    // Кривая пульта: команда тяги = ход·|ход|. Тяга винта растёт примерно как квадрат оборотов,
+    // а установившаяся скорость — как корень из тяги (сопротивление ~v²), поэтому с такой
+    // кривой СКОРОСТЬ аппарата пропорциональна ходу рычага: четверть хода — четверть
+    // паспортной скорости, полный ход — паспортная (1 м/с вперёд у «Марлина»). Раньше
+    // тяга шла прямо от хода, и уже 10 % хода давали треть скорости — у нуля аппарат
+    // дёргался, тихо подойти к трубе было трудно. Только для рычагов: автопилот и помощь
+    // пилоту командуют тягой напрямую, их настройка не меняется.
+    static float КриваяПульта(float ход) => ход * Mathf.Abs(ход);
 
     void WriteToInput(float value)
     {
@@ -261,7 +328,20 @@ public class LeverInteractable : MonoBehaviour
         float dirSign = invert ? -1f : 1f;
         float fullDefl = Mathf.Max(Mathf.Abs(minAngle), Mathf.Abs(maxAngle));
 
-        if (_grabHand != null)
+        if (_grabHand != null && ДержитРукой >= 0)
+        {
+            // Рукой: рукоятка за рукой по обеим осям (вперёд/назад — вокруг Z, вбок — вокруг X).
+            float вперёд = _grabStartAngle - ПоворотРукой(Vector3.forward);
+            float вбок = _grabStartAngleLat - ПоворотРукой(Vector3.right);
+            if (крестоваяТраектория)
+            {
+                if (Mathf.Abs(вперёд - _grabStartAngle) >= Mathf.Abs(вбок - _grabStartAngleLat)) вбок = _grabStartAngleLat;
+                else вперёд = _grabStartAngle;
+            }
+            _angle = Mathf.Clamp(вперёд, minAngle, maxAngle);
+            _angleLat = Mathf.Clamp(вбок, minAngle, maxAngle);
+        }
+        else if (_grabHand != null)
         {
             // Прямое отклонение от точки захвата: тянешь руку вперёд/назад — тяга вперёд/назад,
             // тянешь вбок — боковой снос. Ось вперёд/вбок — относительно взгляда камеры.
@@ -314,8 +394,8 @@ public class LeverInteractable : MonoBehaviour
         float nF = Mathf.InverseLerp(minAngle, maxAngle, _angle)    * 2f - 1f;
         float nL = Mathf.InverseLerp(minAngle, maxAngle, _angleLat) * 2f - 1f;
         if (invert) { nF *= -1f; nL *= -1f; }
-        DroneInput.forward = nF;
-        DroneInput.lateral = nL;
+        DroneInput.forward = КриваяПульта(nF);
+        DroneInput.lateral = КриваяПульта(nL);
     }
 
     void CacheMaterial(Renderer r)

@@ -1,13 +1,12 @@
 using UnityEngine;
 
-// Настройки игрока (PlayerPrefs): громкость по категориям и чем управлять — руками
-// или контроллерами (РежимВводаРига переключает риг XR Origin Hands).
+// Настройки игрока (PlayerPrefs): громкость по категориям; и чем управлять — руками
+// или контроллерами (только на сеанс; РежимВводаРига переключает риг XR Origin Hands).
 public static class GameSettings
 {
-    // Числа — как сохранено в PlayerPrefs (0 был «Авто», теперь читается как «Контроллеры»).
     public enum Ввод { Контроллеры = 1, Руки = 2 }
 
-    const string Kгромкость = "vol_master", Kинтерфейс = "vol_ui", Kввод = "input_mode",
+    const string Kгромкость = "vol_master", Kинтерфейс = "vol_ui",
                  Kокружение = "vol_ambient", Kдвигатели = "vol_motors", Kпомощь = "pilot_assist";
 
     public static float ГромкостьОкружения
@@ -34,10 +33,18 @@ public static class GameSettings
         set { PlayerPrefs.SetFloat(Kинтерфейс, Mathf.Clamp01(value)); PlayerPrefs.Save(); }
     }
 
+    // Режим ввода НЕ сохраняется между запусками: каждый запуск начинается с контроллеров,
+    // руки выбираются в меню на этот сеанс. Сохранённые «Руки» включали руки сразу при
+    // старте, и в эмуляторе в меню нечем было нажать.
+    static Ввод _режимВвода = Ввод.Контроллеры;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    static void СброситьРежим() => _режимВвода = Ввод.Контроллеры;
+
     public static Ввод РежимВвода
     {
-        get => PlayerPrefs.GetInt(Kввод, (int)Ввод.Контроллеры) == (int)Ввод.Руки ? Ввод.Руки : Ввод.Контроллеры;
-        set { PlayerPrefs.SetInt(Kввод, (int)value); PlayerPrefs.Save(); РежимВводаРига.Применить(); }
+        get => _режимВвода;
+        set { _режимВвода = value; РежимВводаРига.Применить(); }
     }
 
     // Помощь пилоту (RovPilotAssist): рычаг в нейтрали — аппарат сам держит глубину и курс.

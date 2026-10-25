@@ -79,7 +79,7 @@ public class RovAudio : MonoBehaviour
 
     void НаУдар(float энергия, string объект)
     {
-        float громк = Mathf.Clamp01(0.3f + энергия / 400f);
+        float громк = Mathf.Clamp01(0.3f + энергия / 60f);   // 10 Дж — 0,47, полный ход в трубу (30 Дж) — 0,8
         _события.PlayOneShot(ПроцЗвук.Удар(), громк * GameSettings.ГромкостьОкружения);
     }
 

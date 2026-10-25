@@ -20,6 +20,8 @@ public static class НаведениеПальцем
 
     static readonly List<XRBaseInteractable> _цели = new List<XRBaseInteractable>();
     static readonly XRBaseInteractable[] _наведены = new XRBaseInteractable[2];   // левая, правая
+    static readonly Vector3[] _палец = new Vector3[2], _былПалец = new Vector3[2];
+    static readonly bool[] _естьПалец = new bool[2], _былЛиПалец = new bool[2];
     static readonly List<XRHandSubsystem> _системы = new List<XRHandSubsystem>();
     static XRHandSubsystem _руки;
     static XROrigin _риг;
@@ -37,19 +39,30 @@ public static class НаведениеПальцем
         return _наведены[0] == и || _наведены[1] == и;
     }
 
+    // Кончик указательного (0 — левая, 1 — правая) сейчас и в прошлый расчёт: для нажатия
+    // «палец прошёл сквозь кнопку» (VrPanel). false — руку не видно оба раза.
+    public static bool Палец(int рука, out Vector3 сейчас, out Vector3 было)
+    {
+        Обновить();
+        сейчас = _палец[рука]; было = _былПалец[рука];
+        return _естьПалец[рука] && _былЛиПалец[рука];
+    }
+
     static void Обновить()
     {
         if (_кадр == Time.frameCount) return;
         _кадр = Time.frameCount;
         _наведены[0] = _наведены[1] = null;
+        for (int с = 0; с < 2; с++) { _былПалец[с] = _палец[с]; _былЛиПалец[с] = _естьПалец[с]; _естьПалец[с] = false; }
         if (GameSettings.РежимВвода != GameSettings.Ввод.Руки || !НайтиРуки()) return;
         _цели.RemoveAll(и => и == null);   // кнопки пересобранных окон уничтожены
-        var т = _риг.Origin.transform;
+        var т = ПространствоРук(_риг);
         for (int с = 0; с < 2; с++)
         {
             var рука = с == 0 ? _руки.leftHand : _руки.rightHand;
             if (!рука.isTracked || !рука.GetJoint(XRHandJointID.IndexTip).TryGetPose(out Pose кончик)) continue;
             Vector3 палец = т.TransformPoint(кончик.position);
+            _палец[с] = палец; _естьПалец[с] = true;
             float лучше = Радиус_м;
             foreach (var и in _цели)
             {
@@ -63,6 +76,13 @@ public static class НаведениеПальцем
             }
         }
     }
+
+    // Пространство, в котором XR Hands отдаёт суставы, — пространство трекинга: объект
+    // Camera Offset рига, а не его корень. У рига режим «от гарнитуры» (Device), и Camera
+    // Offset поднят на рост (~1,1 м): от корня все точки рук выходили на метр ниже видимой
+    // руки — рычаг «в 103 см», палец не доставал до кнопок.
+    public static Transform ПространствоРук(XROrigin риг) =>
+        риг.CameraFloorOffsetObject != null ? риг.CameraFloorOffsetObject.transform : риг.Origin.transform;
 
     // ClosestPoint работает с коробкой, сферой, капсулой и выпуклым мешем; для
     // невыпуклого меша вернул бы саму точку (расстояние 0) — берём его габарит.

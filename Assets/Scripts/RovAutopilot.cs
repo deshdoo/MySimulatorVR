@@ -153,7 +153,18 @@ public class RovAutopilot : MonoBehaviour
     // Настройка подобрана на стенде испытаний (RovManeuverTests, ступенька +2 м, 2026-10-01):
     //   исходная 1.2 / 0.25 / 0.6 без защиты — перерегулирование 37,6 %, установление 13,2 с;
     //   итоговая 2.0 / 0.15 / 2.0 с защитой от насыщения — 2 %, 4,8 с.
-    public Pid depthPid = new Pid { kp = 2f, ki = 0.15f, kd = 2f, integralClamp = 4f, антиНасыщение = true };
+    // Тогда аппарат был условный: 10 кг, вертикальная тяга 40 Н. У «Марлина» 60 кг и 82 Н
+    // (вверх — задний ход, 64 Н), присоединённая масса и сопротивление по вертикали больше,
+    // поэтому разгон по вертикали в 3,5 раза слабее. Перенастройка под 60 кг (2026-10-26) —
+    // расчётом контура глубины по тем же уравнениям, что в движке (датчик 5 Гц с шумом,
+    // фильтр, мёртвая зона, сглаживание, защита интеграла); на старом аппарате расчёт дал
+    // 38 % / 13,3 с и 2,7 % / 5,0 с — совпадает со стендом. Ступенька 2 м при пределе 0,55:
+    //   2.0 / 0.15 / 2.0 — 2,5 %, 6,8 с; при плавучести −10 Н проскок 5,5 %;
+    //   3.0 / 0.25 / 3.0 — 2,0 %, 6,7 с; при −10 Н 3,4 %, при тяге 60 % быстрее на 0,3 с.
+    // Быстрее 6,5 с не выходит никакими коэффициентами: ход упирается в предел тяги
+    // (0,4 м/с вниз), а не в регулятор. Ускорить можно только пределом maxAuthority.
+    // Значения задаются в Awake (НастройкаМарлина), а не в сцене: сцена хранила старые.
+    public Pid depthPid = new Pid { kp = 3f, ki = 0.25f, kd = 3f, integralClamp = 4f, антиНасыщение = true };
 
     public enum ИсточникГлубины { Датчик, Истина }
     public enum ИсточникСноса { ДоплеровскийЛаг, Истина }
@@ -183,7 +194,10 @@ public class RovAutopilot : MonoBehaviour
     public float surgeBrakeGain = 0.8f;
     [Tooltip("Коэффициент торможения БОКОВОЙ скорости (лаг). Без него течение под углом к курсу " +
              "сносит аппарат вбок, и парировать это нечем — продольная тяга тут не помогает.")]
-    public float swayBrakeGain = 0.8f;
+    // Команда — доля тяги оси, а лагом «Марлин» тянет 56 Н против 125 Н вперёд. При равных
+    // коэффициентах вбок тормозил бы вдвое слабее: в течении 0,25 м/с оставался снос 0,1 м/с
+    // против 0,05 м/с по курсу. 1,8 = 0,8·125/56 — та же сила на 1 м/с сноса, что по курсу.
+    public float swayBrakeGain = 1.8f;
 
     [Header("Живое удержание (зона, а не точка)")]
     [Tooltip("Мёртвая зона по ГЛУБИНЕ, м. В пределах ±этого автопилот не давит на вертикаль — " +
@@ -268,14 +282,27 @@ public class RovAutopilot : MonoBehaviour
         _rb = GetComponent<Rigidbody>();
         // Статика переживает вход в Play Mode, если отключён Domain Reload — сбрасываем явно.
         RovSystems.depthHoldActive = false;
+        НастройкаМарлина();
         ЗагрузитьНастройку();
+    }
+
+    // Базовая настройка под «Марлин-350» (60 кг) — из кода, поверх значений в сцене
+    // (там остались коэффициенты условного аппарата 10 кг). Как MarlinSpec для движка.
+    void НастройкаМарлина()
+    {
+        depthPid.kp = 3f; depthPid.ki = 0.25f; depthPid.kd = 3f;
+        depthPid.integralClamp = 4f; depthPid.антиНасыщение = true;
+        maxAuthority = 0.55f;
+        surgeBrakeGain = 0.8f; swayBrakeGain = 1.8f;
     }
 
     // Настройка регулятора глубины, подобранная оператором на стенде испытаний
     // (RovManeuverTests, «Настройка автопилота») и запомненная кнопкой «ЗАПОМНИТЬ».
-    // Если сохранённой нет — работают значения из сцены.
+    // Если сохранённой нет — работает НастройкаМарлина. Сохранение помечено аппаратом:
+    // запомненное до «Марлина» (без метки, под 10 кг) не подхватывается.
     const string Kkp = "ap_kp", Kki = "ap_ki", Kkd = "ap_kd", Kaw = "ap_aw", Kmax = "ap_max";
-    public static bool ЕстьСохранённаяНастройка => PlayerPrefs.HasKey(Kkp);
+    const string Kаппарат = "ap_rov", Аппарат = "marlin350";
+    public static bool ЕстьСохранённаяНастройка => PlayerPrefs.HasKey(Kkp) && PlayerPrefs.GetString(Kаппарат, "") == Аппарат;
 
     void ЗагрузитьНастройку()
     {
@@ -293,12 +320,13 @@ public class RovAutopilot : MonoBehaviour
     {
         PlayerPrefs.SetFloat(Kkp, depthPid.kp); PlayerPrefs.SetFloat(Kki, depthPid.ki); PlayerPrefs.SetFloat(Kkd, depthPid.kd);
         PlayerPrefs.SetInt(Kaw, depthPid.антиНасыщение ? 1 : 0); PlayerPrefs.SetFloat(Kmax, maxAuthority);
+        PlayerPrefs.SetString(Kаппарат, Аппарат);
         PlayerPrefs.Save();
     }
 
     public static void ЗабытьНастройку()
     {
-        foreach (var k in new[] { Kkp, Kki, Kkd, Kaw, Kmax }) PlayerPrefs.DeleteKey(k);
+        foreach (var k in new[] { Kkp, Kki, Kkd, Kaw, Kmax, Kаппарат }) PlayerPrefs.DeleteKey(k);
         PlayerPrefs.Save();
     }
 

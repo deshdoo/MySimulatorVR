@@ -67,7 +67,35 @@ public class RovThrusterVisuals : MonoBehaviour
         }
         _винты = список.ToArray();
         Команды = new float[_винты.Length];
+        Готов = true;
     }
+
+    // Винты найдены и разобраны (Start прошёл).
+    public bool Готов { get; private set; }
+    public bool ЕстьГоризонтальные { get { foreach (var в in _винты) if (!в.вертикальный) return true; return false; } }
+
+    // Какую долю полной тяги дают горизонтальные винты при команде (вперёд, лаг, рысканье),
+    // если винт на заднем ходу тянет «реверс» от переднего. Распределение — то же, что для
+    // вращения (Update): каждый винт получает свою команду по направлению оси и плечу.
+    // Доля = Σ|uᵢ|·kᵢ / Σ|uᵢ|, kᵢ = 1 на переднем ходу и реверс на заднем.
+    public float ДоляГоризонтальных(float вперёд, float лаг, float рыск, float реверс)
+    {
+        float норм = 1f, сумма = 0f, вес = 0f;
+        foreach (var в in _винты)
+            if (!в.вертикальный) норм = Mathf.Max(норм, Mathf.Abs(КомандаГоризонтального(в, вперёд, лаг, рыск)));
+        foreach (var в in _винты)
+        {
+            if (в.вертикальный) continue;
+            float u = КомандаГоризонтального(в, вперёд, лаг, рыск) / норм;
+            if (Mathf.Abs(u) < 1e-4f) continue;
+            вес += Mathf.Abs(u);
+            сумма += Mathf.Abs(u) * (u >= 0f ? 1f : реверс);
+        }
+        return вес > 0f ? сумма / вес : 1f;
+    }
+
+    static float КомандаГоризонтального(Винт в, float вперёд, float лаг, float рыск) =>
+        Vector3.Dot(в.тягаКорпус, new Vector3(лаг, 0f, вперёд)) * 1.41421f + рыск * в.плечоЗнак;
 
     static Transform НайтиВоВнуках(Transform корень, string имя)
     {

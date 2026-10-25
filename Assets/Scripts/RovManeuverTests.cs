@@ -285,6 +285,15 @@ public class RovManeuverTests : MonoBehaviour
         }
     }
 
+    // Эталон учитывает тот же задний ход винтов, что и модель (RovController.МножительТяги).
+    float Реверс(Ось ось, float u) => _rov.МножительТяги(ось switch
+    {
+        Ось.Продольная => RovController.ОсьХод,
+        Ось.Вертикальная => RovController.ОсьВертикаль,
+        Ось.Боковая => RovController.ОсьЛаг,
+        _ => RovController.ОсьРыск,
+    }, u);
+
     static Vector4 Команда(Ось ось, float u)
     {
         switch (ось)
@@ -352,7 +361,7 @@ public class RovManeuverTests : MonoBehaviour
         о.эталон.Add(v0 * к);
         for (int i = 1; i <= N; i++)
         {
-            float F = i <= iКонца ? u * п.F1 : 0f;
+            float F = i <= iКонца ? u * п.F1 * Реверс(ось, u) : 0f;
             for (int j = 0; j < 10; j++)
             {
                 float k1 = Ускорение(п, F, v), k2 = Ускорение(п, F, v + 0.5f * h * k1);
@@ -371,7 +380,7 @@ public class RovManeuverTests : MonoBehaviour
         if (tТяги > 0f && (u != 0f || п.F0 != 0f))
         {
             float средн = Среднее(о.модель, конецТяги - Mathf.RoundToInt((u != 0f ? 0.5f : 3f) / dt), конецТяги);
-            float точн = Установившаяся(п, u * п.F1) * к;
+            float точн = Установившаяся(п, u * п.F1 * Реверс(ось, u)) * к;
             о.П("Установившаяся скорость", средн, точн, ед);
             float t63м = ВремяДоли(о.t, о.модель, 0.632f * средн, конецТяги);
             float t63э = ВремяДоли(о.t, о.эталон, 0.632f * точн, конецТяги);

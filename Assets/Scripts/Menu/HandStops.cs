@@ -80,7 +80,7 @@ public class УпорРук : MonoBehaviour
             var рука = можно ? (с == 0 ? _подсистема.leftHand : _подсистема.rightHand) : default;
             if (можно && рука.isTracked && рука.GetJoint(XRHandJointID.IndexTip).TryGetPose(out Pose кончик))
             {
-                var т = _риг.Origin.transform;   // суставы — относительно начала XR Origin
+                var т = НаведениеПальцем.ПространствоРук(_риг);   // суставы — в пространстве трекинга (Camera Offset)
                 Vector3 палец = т.TransformPoint(кончик.position);
                 if (НаРычаге(р, с, рука, т, out Vector3 кРучке)) { цель = кРучке; τ = Прилипнуть_τ; р.Упор = default; }
                 else { цель = Упор(р, палец); τ = цель == Vector3.zero ? Догнать_τ : 0f; }   // упор — сразу, иначе палец успеет уйти в окно
@@ -190,11 +190,7 @@ public class УпорРук : MonoBehaviour
         сдвиг = Vector3.zero;
         LeverInteractable держит = null;
         foreach (var л in LeverInteractable.Все)
-        {
-            var кто = л != null ? л.Держит : null;
-            if (кто == null || кто is XRPokeInteractor) continue;
-            if (кто.handedness == (с == 0 ? InteractorHandedness.Left : InteractorHandedness.Right)) { держит = л; break; }
-        }
+            if (л != null && л.ДержитРука(с)) { держит = л; break; }
         if (держит == null || !рука.GetJoint(XRHandJointID.Palm).TryGetPose(out Pose п)) { р.Рычаг = null; return false; }
 
         Vector3 ладонь = т.TransformPoint(п.position);
