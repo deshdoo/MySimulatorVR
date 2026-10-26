@@ -29,3 +29,6 @@ Assets/_Recovery/
 # Личные пояснялки / доки — не в репозиторий
 Docs/
 LeverController-разбор.pdf
+
+# Временные файлы сборки Unity
+.utmp/

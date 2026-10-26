@@ -4,7 +4,7 @@ using UnityEditor;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
 
-// Название приложения и сборка APK для автономного шлема (Quest без ПК).
+// Название приложения и сборки: APK для автономного шлема (Quest без ПК) и EXE для ПК со шлемом.
 //
 // Название «ROVsim» ставится само после компиляции (подпись под значком на шлеме и
 // в Windows). Идентификатор пакета не меняется: иначе шлем считал бы сборку новым
@@ -34,20 +34,44 @@ static class СборкаROVsim
 
     public static void APK()
     {
+        Собрать($"Builds/{Название}.apk", BuildTarget.Android, BuildTargetGroup.Android);
+        if (Application.isBatchMode) EditorApplication.Exit(_успех ? 0 : 1);
+    }
+
+    // EXE для ПК со шлемом (Quest через Link или Air Link, SteamVR): OpenXR под Windows.
+    //   Unity.exe -batchmode -quit -projectPath <проект> -buildTarget Win64
+    //             -executeMethod СборкаROVsim.EXE -logFile Builds/build_pc.log
+    // Результат — папка Builds/ROVsim_PC: ROVsim.exe рядом с ROVsim_Data, переносить целиком.
+    // Сборка на Mono: модуля IL2CPP под Windows в установленном Unity нет. Настройка
+    // проекта (IL2CPP) на время сборки подменяется и возвращается обратно.
+    public static void EXE()
+    {
+        var группа = UnityEditor.Build.NamedBuildTarget.Standalone;
+        var было = PlayerSettings.GetScriptingBackend(группа);
+        PlayerSettings.SetScriptingBackend(группа, ScriptingImplementation.Mono2x);
+        try { Собрать($"Builds/{Название}_PC/{Название}.exe", BuildTarget.StandaloneWindows64, BuildTargetGroup.Standalone); }
+        finally { PlayerSettings.SetScriptingBackend(группа, было); AssetDatabase.SaveAssets(); }
+        if (Application.isBatchMode) EditorApplication.Exit(_успех ? 0 : 1);
+    }
+
+    static bool _успех;
+
+    static void Собрать(string путь, BuildTarget цель, BuildTargetGroup группа)
+    {
         ПоставитьНазвание();
-        Directory.CreateDirectory("Builds");
+        Directory.CreateDirectory(Path.GetDirectoryName(путь));
         var сцены = EditorBuildSettings.scenes.Where(s => s.enabled).Select(s => s.path).ToArray();
         var отчёт = BuildPipeline.BuildPlayer(new BuildPlayerOptions
         {
             scenes = сцены,
-            locationPathName = $"Builds/{Название}.apk",
-            target = BuildTarget.Android,
-            targetGroup = BuildTargetGroup.Android,
+            locationPathName = путь,
+            target = цель,
+            targetGroup = группа,
             options = BuildOptions.None,
         });
         var итог = отчёт.summary;
+        _успех = итог.result == BuildResult.Succeeded;
         Debug.Log($"[Сборка] {итог.result}: {итог.outputPath}, {итог.totalSize / (1024 * 1024)} МБ, " +
                   $"ошибок {итог.totalErrors}, {итог.totalTime.TotalMinutes:0.0} мин");
-        if (Application.isBatchMode) EditorApplication.Exit(итог.result == BuildResult.Succeeded ? 0 : 1);
     }
 }
